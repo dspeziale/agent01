@@ -1,0 +1,16 @@
+{
+  "server_url": "https://simei.dsc-italy.app/api/v1/metrics",
+  "api_key": "TUO_TOKEN_SEGRETO",
+  "auth_type": "Bearer",
+  "interval_seconds": 15.0,
+  "verify_ssl": true,
+  "offline_buffer_enabled": true,
+  "offline_buffer_db_path": "sysmon_buffer.db",
+  "include_processes": true,
+  "top_processes_count": 10,
+  "custom_tags": {
+    "environment": "production"
+  },
+  "log_level": "INFO",
+  "log_file": "sysmon.log"
+}

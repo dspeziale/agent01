@@ -1,0 +1,6 @@
+# Configurazione esplicita per Coolify con Nixpacks
+[phases.install]
+cmds = ["python -m pip install -r requirements.txt"]
+
+[start]
+cmd = "python -m uvicorn server.main:app --host 0.0.0.0 --port ${PORT:-8000}"
