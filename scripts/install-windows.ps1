@@ -267,19 +267,21 @@ Write-Host "  -> File configurazione generato: $ConfigFile" -ForegroundColor Gra
 # 5. Registrazione Servizio / Attività Pianificata (Avvio automatico al boot)
 Write-Host "`n[5/5] Registrazione Attivita' Pianificata Windows ($TaskName)..." -ForegroundColor Yellow
 
-$LauncherVbs = Join-Path $InstallDir "sysmon_service.vbs"
+$VenvPythonW = Join-Path $VenvDir "Scripts\pythonw.exe"
+if (-not (Test-Path $VenvPythonW)) { $VenvPythonW = $VenvPython }
 $MainPy = Join-Path $InstallDir "main.py"
 
-# Script VBS per eseguire l'interprete Python senza mostrare alcuna finestra console o popup
-$VbsContent = "CreateObject(`"Wscript.Shell`").Run `"`"`"$VenvPython`"`" `"`"$MainPy`"`" --config `"`"$ConfigFile`"`"`, 0, False"
-[System.IO.File]::WriteAllText($LauncherVbs, $VbsContent, [System.Text.Encoding]::ASCII)
+# Termina eventuali istanze precedenti
+Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like "*main.py*" -and $_.CommandLine -like "*Sysmon*" } | ForEach-Object {
+    Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+}
 
 $registered = $false
 if (Get-Command Register-ScheduledTask -ErrorAction SilentlyContinue) {
     try {
         Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue | Out-Null
         
-        $action = New-ScheduledTaskAction -Execute "wscript.exe" -Argument "`"$LauncherVbs`""
+        $action = New-ScheduledTaskAction -Execute $VenvPythonW -Argument "`"$MainPy`" --config `"$ConfigFile`"" -WorkingDirectory $InstallDir
         $trigger = New-ScheduledTaskTrigger -AtStartup
         $principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
         $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Days 0)
@@ -289,41 +291,65 @@ if (Get-Command Register-ScheduledTask -ErrorAction SilentlyContinue) {
         $registered = $true
     } catch {
         try {
-            # Fallback se SYSTEM non e' consentito: esegui ad accesso utente come Administrator
+            # Fallback se SYSTEM non e' consentito dalla policy locale: trigger al logon dell'utente
             $triggerLogon = New-ScheduledTaskTrigger -AtLogOn
             $principalLogon = New-ScheduledTaskPrincipal -GroupId "BUILTIN\Administrators" -RunLevel Highest
             $taskObj = New-ScheduledTask -Action $action -Trigger $triggerLogon -Principal $principalLogon -Settings $settings
             Register-ScheduledTask -TaskName $TaskName -InputObject $taskObj -Force -ErrorAction Stop | Out-Null
             $registered = $true
         } catch {
-            Write-Host "  -> Registrazione cmdlet fallita, uso fallback schtasks..." -ForegroundColor Yellow
+            Write-Host "  -> Registrazione cmdlet fallita, utilizzo fallback schtasks..." -ForegroundColor Yellow
         }
     }
 }
 
-# Fallback schtasks.exe con ShortPath (notazione 8.3 priva di spazi)
+# Fallback con schtasks.exe (usando ShortPath 8.3 privo di spazi)
 if (-not $registered) {
     try {
         cmd.exe /c "schtasks.exe /End /TN $TaskName 2>nul" | Out-Null
         cmd.exe /c "schtasks.exe /Delete /TN $TaskName /F 2>nul" | Out-Null
         
         $fso = New-Object -ComObject Scripting.FileSystemObject
-        $shortPath = if (Test-Path $LauncherVbs) { $fso.GetFile($LauncherVbs).ShortPath } else { $LauncherVbs }
+        $shortPy = if (Test-Path $VenvPythonW) { $fso.GetFile($VenvPythonW).ShortPath } else { $VenvPythonW }
+        $shortMain = if (Test-Path $MainPy) { $fso.GetFile($MainPy).ShortPath } else { $MainPy }
+        $shortCfg = if (Test-Path $ConfigFile) { $fso.GetFile($ConfigFile).ShortPath } else { $ConfigFile }
         
-        & schtasks.exe /Create /TN $TaskName /TR "wscript.exe $shortPath" /SC ONSTART /RU "SYSTEM" /RL HIGHEST /F 2>$null
+        & schtasks.exe /Create /TN $TaskName /TR "`"$shortPy`" `"$shortMain`" --config `"$shortCfg`"" /SC ONSTART /RU "SYSTEM" /RL HIGHEST /F 2>$null
         if ($LASTEXITCODE -ne 0) {
-            & schtasks.exe /Create /TN $TaskName /TR "wscript.exe $shortPath" /SC ONLOGON /RL HIGHEST /F 2>$null
+            & schtasks.exe /Create /TN $TaskName /TR "`"$shortPy`" `"$shortMain`" --config `"$shortCfg`"" /SC ONLOGON /RL HIGHEST /F 2>$null
         }
     } catch {}
 }
 
-# Avvio immediato dell'attività
+# Avvio immediato tramite Task Scheduler
 if (Get-Command Start-ScheduledTask -ErrorAction SilentlyContinue) {
     Start-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue | Out-Null
 } else {
     cmd.exe /c "schtasks.exe /Run /TN $TaskName 2>nul" | Out-Null
 }
+
+# Garanzia di avvio immediato: se Task Scheduler ritarda l'esecuzione, avvia subito il processo in background
 Start-Sleep -Seconds 2
+$runningProc = Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like "*main.py*" -and $_.CommandLine -like "*Sysmon*" }
+if (-not $runningProc) {
+    Start-Process -FilePath $VenvPythonW -ArgumentList "`"$MainPy`" --config `"$ConfigFile`"" -WorkingDirectory $InstallDir -WindowStyle Hidden
+}
+
+# Diagnostica e verifica in tempo reale
+Write-Host "`n[Verifica] Controllo operativita' agente e prima trasmissione..." -ForegroundColor Yellow
+Start-Sleep -Seconds 4
+
+$activeProc = Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like "*main.py*" -and $_.CommandLine -like "*Sysmon*" }
+if ($activeProc) {
+    Write-Host "  -> Agente Sysmon in esecuzione con PID: $($activeProc.ProcessId -join ', ')" -ForegroundColor Green
+} else {
+    Write-Host "  -> [ATTENZIONE] Il processo non risulta ancora visibile tra i processi attivi." -ForegroundColor Yellow
+}
+
+if (Test-Path $LogFilePath) {
+    Write-Host "`n--- Ultimi log registrati da $LogFilePath ---" -ForegroundColor Cyan
+    Get-Content $LogFilePath -Tail 6 | ForEach-Object { Write-Host "  $_" -ForegroundColor Gray }
+}
 
 Write-Host "`n==========================================================" -ForegroundColor Green
 Write-Host "    INSTALLAZIONE COMPLETATA CON SUCCESSO SU WINDOWS!      " -ForegroundColor Green
