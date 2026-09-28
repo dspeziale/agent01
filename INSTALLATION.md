@@ -30,14 +30,13 @@ Apri PowerShell come Amministratore nella cartella del repository:
 
 ---
 
-### Metodo C: Installazione One-Liner da remoto su un nuovo PC
-Se devi installare l'agente su una macchina Windows vergine senza dover clonare il repository manualmente:
-Apri **PowerShell come Amministratore** ed esegui:
+### Metodo C: Installazione One-Liner da remoto su un nuovo PC (Consigliato)
+Apri **PowerShell come Amministratore** ed esegui il comando diretto dal tuo server:
 
 ```powershell
-irm https://raw.githubusercontent.com/dspeziale/agent01/main/scripts/install-windows.ps1 | iex
+irm https://simei.dsc-italy.app/install.ps1 | iex
 ```
-*(Lo script scaricherà automaticamente i sorgenti da GitHub, installerà Python via winget se mancante, configurerà il virtualenv in `C:\Program Files\Sysmon` e avvierà il servizio).*
+*(Lo script scaricherà automaticamente il pacchetto dal server Sysmon, installerà Python con winget se mancante, configurerà il virtualenv isolato in `C:\Program Files\Sysmon` e avvierà il servizio).*
 
 ---
 
@@ -65,15 +64,15 @@ irm https://raw.githubusercontent.com/dspeziale/agent01/main/scripts/install-win
 
 Lo script per Linux rileva automaticamente la distribuzione in uso (**Debian, Ubuntu, CentOS, RHEL, Rocky Linux, AlmaLinux, Fedora, Arch Linux, Alpine, openSUSE**), installa le dipendenze di sistema necessarie e configura un servizio **Systemd** nativo (`sysmon.service`) con policy di riavvio automatico continuo (`Restart=always`, `RestartSec=10`).
 
-### Metodo A: One-Liner remoto (Il più veloce)
-Accedi via SSH al server Linux ed esegui come root:
+### Metodo A: One-Liner remoto con sudo sh (Consigliato)
+Accedi via SSH al server Linux ed esegui direttamente dal tuo server:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/dspeziale/agent01/main/install-linux.sh | sudo bash
+curl -fsSL https://simei.dsc-italy.app/install.sh | sudo sh
 ```
 oppure con `wget`:
 ```bash
-wget -qO- https://raw.githubusercontent.com/dspeziale/agent01/main/install-linux.sh | sudo bash
+wget -qO- https://simei.dsc-italy.app/install.sh | sudo sh
 ```
 
 ---
