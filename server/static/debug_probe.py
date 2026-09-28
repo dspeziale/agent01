@@ -82,7 +82,7 @@ def find_sysmon_installation() -> Tuple[Optional[str], Optional[Dict[str, Any]]]
         cfg_path = os.path.join(d, "config.json")
         if os.path.isfile(cfg_path):
             try:
-                with open(cfg_path, "r", encoding="utf-8") as f:
+                with open(cfg_path, "r", encoding="utf-8-sig") as f:
                     cfg = json.load(f)
                 return d, cfg
             except Exception as e:

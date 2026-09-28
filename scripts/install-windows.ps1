@@ -258,7 +258,8 @@ $configObj = @{
 }
 
 $configJson = $configObj | ConvertTo-Json -Depth 4
-[System.IO.File]::WriteAllText($ConfigFile, $configJson, [System.Text.Encoding]::UTF8)
+$utf8NoBom = New-Object System.Text.UTF8Encoding $false
+[System.IO.File]::WriteAllText($ConfigFile, $configJson, $utf8NoBom)
 
 Write-Host "  -> Server di destinazione: $ServerUrl" -ForegroundColor Cyan
 Write-Host "  -> Intervallo campionamento: ogni ${Interval}s" -ForegroundColor Cyan

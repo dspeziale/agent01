@@ -88,7 +88,7 @@ class AgentConfig:
         target_file = config_file or os.environ.get("SYSMON_CONFIG_FILE", "config.json")
         if target_file and os.path.isfile(target_file):
             try:
-                with open(target_file, "r", encoding="utf-8") as f:
+                with open(target_file, "r", encoding="utf-8-sig") as f:
                     file_content = json.load(f)
                     if isinstance(file_content, dict):
                         config_data.update(file_content)
