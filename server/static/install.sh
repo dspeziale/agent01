@@ -1,6 +1,6 @@
 #!/bin/sh
 # ==============================================================================
-# Sysmon Agent - Remote Installer per Linux
+# Pulsar Agent - Remote Installer per Linux
 # Da eseguire con: sudo sh
 #
 # Comando one-liner:
@@ -12,17 +12,18 @@
 set -e
 
 # Configurazione predefinita (personalizzabile tramite variabili d'ambiente)
-SERVER_URL="${SERVER_URL:-https://simei.dsc-italy.app}"
+SERVER_URL="${PULSAR_SERVER:-${SERVER_URL:-https://simei.dsc-italy.app}}"
 METRICS_URL="${METRICS_URL:-${SERVER_URL}/api/v1/metrics}"
 DOWNLOAD_URL="${SERVER_URL}/download/agent.tar.gz"
 FALLBACK_URL="https://github.com/dspeziale/agent01/archive/refs/heads/main.tar.gz"
-TOKEN="${TOKEN:-}"
+TOKEN="${PULSAR_TOKEN:-${TOKEN:-}}"
 INTERVAL="${INTERVAL:-15}"
-INSTALL_DIR="${INSTALL_DIR:-/opt/sysmon}"
-SERVICE_NAME="sysmon.service"
+INSTALL_DIR="${INSTALL_DIR:-/opt/pulsar}"
+LEGACY_DIR="/opt/sysmon"
+SERVICE_NAME="pulsar.service"
 
 echo "=========================================================="
-echo "    SYSMON AGENT - INSTALLAZIONE REMOTA LINUX (sudo sh)   "
+echo "    PULSAR AGENT - INSTALLAZIONE REMOTA LINUX (sudo sh)   "
 echo "=========================================================="
 
 # 1. Verifica privilegi di root
@@ -33,13 +34,13 @@ if [ "$(id -u)" -ne 0 ]; then
     exit 1
 fi
 
-# 2. Verifica e rimozione completa di versioni precedenti
+# 2. Verifica e rimozione completa di versioni precedenti (Pulsar e Sysmon)
 echo "[1/6] Verifica e rimozione completa di versioni precedenti..."
 HAD_PREVIOUS=false
 
-# A. Arresto e rimozione di qualsiasi servizio systemd Sysmon
+# A. Arresto e rimozione di qualsiasi servizio systemd (Pulsar e legacy Sysmon)
 if [ -x "$(command -v systemctl)" ]; then
-    for s in "${SERVICE_NAME}" "sysmon" "sysmon.service"; do
+    for s in "pulsar" "pulsar.service" "sysmon" "sysmon.service"; do
         if systemctl is-active --quiet "$s" 2>/dev/null || systemctl is-enabled --quiet "$s" 2>/dev/null || [ -f "/etc/systemd/system/$s" ]; then
             HAD_PREVIOUS=true
             echo "  -> Rimozione servizio systemd precedente: $s..."
@@ -55,28 +56,32 @@ if [ -x "$(command -v systemctl)" ]; then
     fi
 fi
 
-# B. Terminazione forzata di eventuali processi Sysmon residenti
-OLD_PIDS=$(pgrep -f "sysmon.*main.py|${INSTALL_DIR}/main.py|debug_probe.py" 2>/dev/null || true)
+# B. Terminazione forzata di eventuali processi residenti
+OLD_PIDS=$(pgrep -f "pulsar.*main.py|sysmon.*main.py|${INSTALL_DIR}/main.py|${LEGACY_DIR}/main.py|debug_probe.py" 2>/dev/null || true)
 if [ -n "${OLD_PIDS}" ]; then
     HAD_PREVIOUS=true
-    echo "  -> Arresto forzato processi Sysmon attivi..."
+    echo "  -> Arresto forzato processi agenti attivi..."
+    pkill -9 -f "pulsar.*main.py" 2>/dev/null || true
     pkill -9 -f "sysmon.*main.py" 2>/dev/null || true
     pkill -9 -f "${INSTALL_DIR}/main.py" 2>/dev/null || true
-    pkill -9 -f "${INSTALL_DIR}/debug_probe.py" 2>/dev/null || true
+    pkill -9 -f "${LEGACY_DIR}/main.py" 2>/dev/null || true
+    pkill -9 -f "debug_probe.py" 2>/dev/null || true
     sleep 1
 fi
 
-# C. Pulizia completa file e moduli obsoleti nella cartella di installazione
-if [ -d "${INSTALL_DIR}" ]; then
-    if [ -d "${INSTALL_DIR}/sysmon" ] || [ -f "${INSTALL_DIR}/main.py" ] || [ -f "${INSTALL_DIR}/config.json" ]; then
-        HAD_PREVIOUS=true
-        echo "  -> Pulizia file e moduli della versione precedente in ${INSTALL_DIR}..."
-        rm -rf "${INSTALL_DIR}/sysmon"
-        rm -f "${INSTALL_DIR}/main.py" "${INSTALL_DIR}/debug_probe.py" "${INSTALL_DIR}/requirements-agent.txt"
-        rm -f "${INSTALL_DIR}/sysmon_buffer.db"
-        find "${INSTALL_DIR}" -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
+# C. Pulizia completa file e moduli obsoleti nelle cartelle di installazione
+for d in "${INSTALL_DIR}" "${LEGACY_DIR}"; do
+    if [ -d "$d" ]; then
+        if [ -d "$d/pulsar" ] || [ -d "$d/sysmon" ] || [ -f "$d/main.py" ] || [ -f "$d/config.json" ]; then
+            HAD_PREVIOUS=true
+            echo "  -> Pulizia file e moduli della versione precedente in $d..."
+            rm -rf "$d/pulsar" "$d/sysmon"
+            rm -f "$d/main.py" "$d/debug_probe.py" "$d/requirements-agent.txt"
+            rm -f "$d/pulsar_buffer.db" "$d/sysmon_buffer.db"
+            find "$d" -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
+        fi
     fi
-fi
+done
 
 if [ "$HAD_PREVIOUS" = true ]; then
     echo "  -> Disinstallazione e pulizia completata con successo."
@@ -116,15 +121,15 @@ if ! [ -x "$(command -v python3)" ]; then
 fi
 echo "  -> Python 3 rilevato: $(python3 --version 2>&1)"
 
-# 2. Creazione cartella e download bundle agente
+# 4. Creazione cartella e download bundle agente
 echo "[3/6] Download agente telemetria da ${SERVER_URL}..."
 mkdir -p "${INSTALL_DIR}"
-TMP_TAR="/tmp/sysmon-agent.tar.gz"
+TMP_TAR="/tmp/pulsar-agent.tar.gz"
 rm -f "${TMP_TAR}"
 
 DOWNLOAD_SUCCESS=false
 
-# Tentativo download diretto dal server Sysmon
+# Tentativo download diretto dal server primario
 if [ -x "$(command -v curl)" ]; then
     if curl -fsSL "${DOWNLOAD_URL}" -o "${TMP_TAR}" >/dev/null 2>&1; then
         DOWNLOAD_SUCCESS=true
@@ -145,40 +150,50 @@ if [ "$DOWNLOAD_SUCCESS" = false ] || [ ! -f "${TMP_TAR}" ]; then
 fi
 
 # Estrazione pacchetto
-TMP_EXTRACT="/tmp/sysmon-extract-$$"
+TMP_EXTRACT="/tmp/pulsar-extract-$$"
 mkdir -p "${TMP_EXTRACT}"
 tar -xzf "${TMP_TAR}" -C "${TMP_EXTRACT}"
 rm -f "${TMP_TAR}"
 
-# Se l'archivio contiene una sottocartella radice (come da GitHub) oppure e' piatto (come dal nostro bundle)
-if [ -d "${TMP_EXTRACT}/sysmon" ]; then
-    cp -r "${TMP_EXTRACT}/sysmon" "${INSTALL_DIR}/"
-    cp "${TMP_EXTRACT}/main.py" "${INSTALL_DIR}/"
-    [ -f "${TMP_EXTRACT}/requirements-agent.txt" ] && cp "${TMP_EXTRACT}/requirements-agent.txt" "${INSTALL_DIR}/"
-    [ -f "${TMP_EXTRACT}/debug_probe.py" ] && cp "${TMP_EXTRACT}/debug_probe.py" "${INSTALL_DIR}/"
-else
-    # Cerca la cartella contenente sysmon
-    FOUND_DIR="$(find "${TMP_EXTRACT}" -name "sysmon" -type d | head -n 1)"
-    if [ -n "${FOUND_DIR}" ]; then
-        PARENT_DIR="$(dirname "${FOUND_DIR}")"
-        cp -r "${PARENT_DIR}/sysmon" "${INSTALL_DIR}/"
-        cp "${PARENT_DIR}/main.py" "${INSTALL_DIR}/"
-        [ -f "${PARENT_DIR}/requirements-agent.txt" ] && cp "${PARENT_DIR}/requirements-agent.txt" "${INSTALL_DIR}/"
-        [ -f "${PARENT_DIR}/debug_probe.py" ] && cp "${PARENT_DIR}/debug_probe.py" "${INSTALL_DIR}/"
+# Trova la cartella sorgente
+SRC_DIR="${TMP_EXTRACT}"
+if [ ! -d "${TMP_EXTRACT}/pulsar" ] && [ ! -d "${TMP_EXTRACT}/sysmon" ]; then
+    FOUND_PULSAR="$(find "${TMP_EXTRACT}" -name "pulsar" -type d | head -n 1)"
+    if [ -n "${FOUND_PULSAR}" ]; then
+        SRC_DIR="$(dirname "${FOUND_PULSAR}")"
     else
-        echo "[ERRORE] Struttura archivio non valida."
-        rm -rf "${TMP_EXTRACT}"
-        exit 1
+        FOUND_SYSMON="$(find "${TMP_EXTRACT}" -name "sysmon" -type d | head -n 1)"
+        if [ -n "${FOUND_SYSMON}" ]; then
+            SRC_DIR="$(dirname "${FOUND_SYSMON}")"
+        fi
     fi
 fi
+
+if [ -d "${SRC_DIR}/pulsar" ]; then
+    cp -r "${SRC_DIR}/pulsar" "${INSTALL_DIR}/"
+fi
+if [ -d "${SRC_DIR}/sysmon" ]; then
+    cp -r "${SRC_DIR}/sysmon" "${INSTALL_DIR}/"
+fi
+if [ -f "${SRC_DIR}/main.py" ]; then
+    cp "${SRC_DIR}/main.py" "${INSTALL_DIR}/"
+fi
+if [ -f "${SRC_DIR}/requirements-agent.txt" ]; then
+    cp "${SRC_DIR}/requirements-agent.txt" "${INSTALL_DIR}/"
+fi
+if [ -f "${SRC_DIR}/debug_probe.py" ]; then
+    cp "${SRC_DIR}/debug_probe.py" "${INSTALL_DIR}/"
+fi
+
 rm -rf "${TMP_EXTRACT}"
+
 # Assicura presenza di debug_probe.py
 if [ ! -f "${INSTALL_DIR}/debug_probe.py" ]; then
     curl -fsSL "${SERVER_URL}/debug.py" -o "${INSTALL_DIR}/debug_probe.py" 2>/dev/null || true
 fi
 echo "  -> File dell'agente posizionati in ${INSTALL_DIR}"
 
-# 3. Creazione ambiente virtuale Python e dipendenze
+# 5. Creazione ambiente virtuale Python e dipendenze
 echo ""
 echo "[4/6] Creazione virtual environment (.venv) e installazione dipendenze..."
 VENV_DIR="${INSTALL_DIR}/.venv"
@@ -197,7 +212,7 @@ else
 fi
 echo "  -> psutil e requests installati correttamente."
 
-# 4. Generazione configurazione config.json
+# 6. Generazione configurazione config.json
 echo ""
 echo "[5/6] Configurazione agente (config.json) e test invio..."
 AUTH_TYPE="None"
@@ -213,14 +228,14 @@ cat <<EOF > "${INSTALL_DIR}/config.json"
   "interval_seconds": ${INTERVAL},
   "verify_ssl": true,
   "offline_buffer_enabled": true,
-  "offline_buffer_db_path": "${INSTALL_DIR}/sysmon_buffer.db",
+  "offline_buffer_db_path": "${INSTALL_DIR}/pulsar_buffer.db",
   "include_processes": true,
   "top_processes_count": 10,
   "include_disk_io": true,
   "include_net_io": true,
   "include_network_interfaces": true,
   "log_level": "INFO",
-  "log_file": "${INSTALL_DIR}/sysmon.log"
+  "log_file": "${INSTALL_DIR}/pulsar.log"
 }
 EOF
 chmod 600 "${INSTALL_DIR}/config.json"
@@ -239,14 +254,14 @@ else
     echo "  -> Puoi verificare la causa eseguendo: curl -fsSL ${SERVER_URL}/debug.sh | sudo sh"
 fi
 
-# 5. Registrazione e avvio servizio Systemd
+# 7. Registrazione e avvio servizio Systemd
 echo ""
 echo "[6/6] Registrazione e avvio servizio di sistema..."
 if [ -x "$(command -v systemctl)" ]; then
     SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}"
     cat <<EOF > "${SERVICE_FILE}"
 [Unit]
-Description=Sysmon - Agente Telemetria di Sistema
+Description=Pulsar - Agente Telemetria di Sistema
 Documentation=${SERVER_URL}
 After=network-online.target
 Wants=network-online.target
@@ -275,7 +290,7 @@ EOF
     fi
 else
     # Fallback per container o sistemi privi di systemd
-    nohup "${VENV_DIR}/bin/python" "${INSTALL_DIR}/main.py" --config "${INSTALL_DIR}/config.json" > "${INSTALL_DIR}/sysmon.stdout.log" 2>&1 &
+    nohup "${VENV_DIR}/bin/python" "${INSTALL_DIR}/main.py" --config "${INSTALL_DIR}/config.json" > "${INSTALL_DIR}/pulsar.stdout.log" 2>&1 &
     echo "  -> Agente avviato in background con PID: $!"
 fi
 
@@ -283,9 +298,9 @@ echo ""
 echo "=========================================================="
 echo "    INSTALLAZIONE COMPLETATA CON SUCCESSO SU LINUX!       "
 echo "=========================================================="
-echo "L'agente e' attivo e continuera' ad inviare dati al boot."
+echo "L'agente Pulsar e' attivo e continuera' ad inviare dati al boot."
 echo "Dashboard di controllo flotta: ${SERVER_URL}"
-echo "Verifica stato:   sudo systemctl status sysmon"
-echo "Log in diretta:   sudo journalctl -u sysmon -f"
+echo "Verifica stato:   sudo systemctl status pulsar"
+echo "Log in diretta:   sudo journalctl -u pulsar -f"
 echo "Sonda di debug:   curl -fsSL ${SERVER_URL}/debug.sh | sudo sh"
 echo "=========================================================="

@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Script di installazione e gestione automatica dell'agente Sysmon come servizio di background su Windows.
+    Script di installazione e gestione automatica dell'agente Pulsar come servizio di background su Windows.
 
 .DESCRIPTION
     Configura l'ambiente Python (o lo installa se mancante tramite winget), scarica i sorgenti se eseguito da remoto,
@@ -17,13 +17,13 @@
     Intervallo di invio metriche in secondi (default: 15)
 
 .PARAMETER InstallDir
-    Cartella di installazione (default: cartella corrente del repository, o C:\Program Files\Sysmon se eseguito da remoto)
+    Cartella di installazione (default: cartella corrente del repository, o C:\Program Files\Pulsar se eseguito da remoto)
 
 .PARAMETER Status
     Verifica lo stato del servizio e visualizza gli ultimi log
 
 .PARAMETER Uninstall
-    Rimuove completamente il servizio Sysmon e le attività pianificate dal sistema
+    Rimuove completamente il servizio Pulsar e le attività pianificate dal sistema
 #>
 
 param(
@@ -36,7 +36,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$TaskName = "SysmonAgent"
+$TaskName = "PulsarAgent"
 $GithubZipUrl = "https://github.com/dspeziale/agent01/archive/refs/heads/main.zip"
 
 # -------------------------------------------------------------
@@ -72,41 +72,47 @@ if ([string]::IsNullOrWhiteSpace($InstallDir)) {
     if ($PSScriptRoot) {
         # Se eseguito da file locale
         $candidateLocal = Resolve-Path (Join-Path $PSScriptRoot "..") -ErrorAction SilentlyContinue
-        if ($candidateLocal -and (Test-Path (Join-Path $candidateLocal "sysmon"))) {
+        if ($candidateLocal -and ((Test-Path (Join-Path $candidateLocal "pulsar")) -or (Test-Path (Join-Path $candidateLocal "sysmon")))) {
             $InstallDir = $candidateLocal.Path
-        } elseif (Test-Path (Join-Path $PSScriptRoot "sysmon")) {
+        } elseif ((Test-Path (Join-Path $PSScriptRoot "pulsar")) -or (Test-Path (Join-Path $PSScriptRoot "sysmon"))) {
             $InstallDir = $PSScriptRoot
         }
     }
     
     if ([string]::IsNullOrWhiteSpace($InstallDir)) {
-        # Fallback per esecuzione one-liner da remoto (es. irm ... | iex)
-        $InstallDir = "C:\Program Files\Sysmon"
+        # Fallback per esecuzione da remoto
+        $InstallDir = "C:\Program Files\Pulsar"
     }
 }
+
+$LegacyInstallDir = "C:\Program Files\Sysmon"
 
 # -------------------------------------------------------------
 # 1. CONTROLLO STATO (-Status)
 # -------------------------------------------------------------
 if ($Status) {
-    Write-Host "`n=== STATO DEL SERVIZIO SYSMON (WINDOWS) ===" -ForegroundColor Cyan
-    $taskInfo = cmd.exe /c "schtasks.exe /Query /TN $TaskName /V /FO LIST 2>nul"
-    if ($LASTEXITCODE -eq 0 -and $taskInfo) {
-        Write-Host "Attivita' Pianificata ${TaskName}: PRESENTE" -ForegroundColor Green
-        $taskInfo | Where-Object { $_ -match "Stato|Last Run|Next Run|State|Comment" } | ForEach-Object { Write-Host "  $_" -ForegroundColor White }
-    } else {
-        Write-Host "Attivita' Pianificata ${TaskName}: NON REGISTRATA (o non ancora creata)" -ForegroundColor Yellow
+    Write-Host "`n=== STATO DEL SERVIZIO PULSAR (WINDOWS) ===" -ForegroundColor Cyan
+    
+    foreach ($t in @($TaskName, "SysmonAgent")) {
+        $taskInfo = cmd.exe /c "schtasks.exe /Query /TN $t /V /FO LIST 2>nul"
+        if ($LASTEXITCODE -eq 0 -and $taskInfo) {
+            Write-Host "Attivita' Pianificata ${t}: PRESENTE" -ForegroundColor Green
+            $taskInfo | Where-Object { $_ -match "Stato|Last Run|Next Run|State|Comment" } | ForEach-Object { Write-Host "  $_" -ForegroundColor White }
+        }
     }
 
     # Verifica processi attivi
-    $procs = Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like "*sysmon*" -or $_.CommandLine -like "*main.py*" }
+    $procs = Get-CimInstance Win32_Process | Where-Object { 
+        $_.CommandLine -like "*main.py*" -and ($_.CommandLine -like "*pulsar*" -or $_.CommandLine -like "*sysmon*")
+    }
     if ($procs) {
         Write-Host "`nProcesso Agente in esecuzione: ATTIVO (PID: $($procs.ProcessId -join ', '))" -ForegroundColor Green
     } else {
-        Write-Host "`nNessun processo Sysmon attualmente attivo." -ForegroundColor Yellow
+        Write-Host "`nNessun processo Pulsar/Sysmon attualmente attivo." -ForegroundColor Yellow
     }
 
-    $logPath = Join-Path $InstallDir "sysmon.log"
+    $logPath = Join-Path $InstallDir "pulsar.log"
+    if (-not (Test-Path $logPath)) { $logPath = Join-Path $InstallDir "sysmon.log" }
     if (Test-Path $logPath) {
         Write-Host "`n--- Ultimi log da $logPath ---" -ForegroundColor Cyan
         Get-Content $logPath -Tail 20 | ForEach-Object { Write-Host "  $_" -ForegroundColor Gray }
@@ -120,11 +126,11 @@ if ($Status) {
 # -------------------------------------------------------------
 if ($Uninstall) {
     Write-Host "`n==========================================================" -ForegroundColor Yellow
-    Write-Host "         DISINSTALLAZIONE AGENTE SYSMON (WINDOWS)         " -ForegroundColor Yellow
+    Write-Host "         DISINSTALLAZIONE AGENTE PULSAR (WINDOWS)         " -ForegroundColor Yellow
     Write-Host "==========================================================" -ForegroundColor Yellow
     
-    Write-Host "[1/3] Arresto e cancellazione Attivita' Pianificate Sysmon..." -ForegroundColor Cyan
-    $tasksToCheck = @($TaskName, "${TaskName}_Watchdog", "Sysmon")
+    Write-Host "[1/3] Arresto e cancellazione Attivita' Pianificate Pulsar e Sysmon..." -ForegroundColor Cyan
+    $tasksToCheck = @("PulsarAgent", "PulsarAgent_Watchdog", "Pulsar", "SysmonAgent", "SysmonAgent_Watchdog", "Sysmon")
     foreach ($t in $tasksToCheck) {
         if (Get-Command Stop-ScheduledTask -ErrorAction SilentlyContinue) {
             Stop-ScheduledTask -TaskName $t -ErrorAction SilentlyContinue | Out-Null
@@ -138,30 +144,35 @@ if ($Uninstall) {
 
     Write-Host "[2/3] Terminazione forzata di eventuali processi residenti in background..." -ForegroundColor Cyan
     Get-CimInstance Win32_Process | Where-Object { 
-        ($_.CommandLine -like "*main.py*" -and $_.CommandLine -like "*Sysmon*") -or 
+        ($_.CommandLine -like "*main.py*" -and ($_.CommandLine -like "*Pulsar*" -or $_.CommandLine -like "*Sysmon*")) -or 
         ($_.CommandLine -like "*sysmon_service.vbs*") -or
+        ($_.CommandLine -like "*pulsar_service.vbs*") -or
         ($_.CommandLine -like "*debug_probe.py*" -and $_.ProcessId -ne $PID)
     } | ForEach-Object {
         Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
     }
 
     Write-Host "[3/3] Pulizia file e moduli della precedente installazione..." -ForegroundColor Cyan
-    if (Test-Path $InstallDir) {
-        $filesToClean = @("sysmon_service.vbs", "main.py", "debug_probe.py", "requirements-agent.txt", "sysmon_buffer.db")
-        foreach ($f in $filesToClean) {
-            $fp = Join-Path $InstallDir $f
-            if (Test-Path $fp) { Remove-Item -Path $fp -Force -Recurse -ErrorAction SilentlyContinue }
-        }
-        $oldPkg = Join-Path $InstallDir "sysmon"
-        if (Test-Path $oldPkg) {
-            Remove-Item -Path $oldPkg -Force -Recurse -ErrorAction SilentlyContinue
-        }
-        Get-ChildItem -Path $InstallDir -Filter "__pycache__" -Recurse -Directory -ErrorAction SilentlyContinue | ForEach-Object {
-            Remove-Item -Path $_.FullName -Force -Recurse -ErrorAction SilentlyContinue
+    foreach ($dir in @($InstallDir, $LegacyInstallDir)) {
+        if (Test-Path $dir) {
+            $filesToClean = @("sysmon_service.vbs", "pulsar_service.vbs", "main.py", "debug_probe.py", "requirements-agent.txt", "sysmon_buffer.db", "pulsar_buffer.db")
+            foreach ($f in $filesToClean) {
+                $fp = Join-Path $dir $f
+                if (Test-Path $fp) { Remove-Item -Path $fp -Force -Recurse -ErrorAction SilentlyContinue }
+            }
+            foreach ($pkg in @("sysmon", "pulsar")) {
+                $oldPkg = Join-Path $dir $pkg
+                if (Test-Path $oldPkg) {
+                    Remove-Item -Path $oldPkg -Force -Recurse -ErrorAction SilentlyContinue
+                }
+            }
+            Get-ChildItem -Path $dir -Filter "__pycache__" -Recurse -Directory -ErrorAction SilentlyContinue | ForEach-Object {
+                Remove-Item -Path $_.FullName -Force -Recurse -ErrorAction SilentlyContinue
+            }
         }
     }
 
-    Write-Host "[OK] Agente Sysmon disinstallato con successo dal sistema!`n" -ForegroundColor Green
+    Write-Host "[OK] Agente Pulsar disinstallato con successo dal sistema!`n" -ForegroundColor Green
     exit 0
 }
 
@@ -170,15 +181,14 @@ if ($Uninstall) {
 # -------------------------------------------------------------
 Clear-Host
 Write-Host "==========================================================" -ForegroundColor Cyan
-Write-Host "       SYSMON AGENT - INSTALLATORE AUTOMATICO WINDOWS      " -ForegroundColor Cyan
+Write-Host "       PULSAR AGENT - INSTALLATORE AUTOMATICO WINDOWS      " -ForegroundColor Cyan
 Write-Host "==========================================================`n" -ForegroundColor Cyan
 
 # 0. Verifica e disinstallazione preventiva di versioni precedenti
 Write-Host "[1/6] Verifica e rimozione completa di versioni precedenti..." -ForegroundColor Yellow
 $hadPrevious = $false
 
-# A. Arresto e rimozione di tutte le Attività Pianificate Sysmon
-$tasksToCheck = @($TaskName, "${TaskName}_Watchdog", "Sysmon")
+$tasksToCheck = @("PulsarAgent", "PulsarAgent_Watchdog", "Pulsar", "SysmonAgent", "SysmonAgent_Watchdog", "Sysmon")
 foreach ($t in $tasksToCheck) {
     $exists = $false
     if (Get-Command Get-ScheduledTask -ErrorAction SilentlyContinue) {
@@ -202,41 +212,44 @@ foreach ($t in $tasksToCheck) {
     }
 }
 
-# B. Terminazione forzata di qualsiasi processo precedente attivo
 $oldProcs = Get-CimInstance Win32_Process | Where-Object { 
-    ($_.CommandLine -like "*main.py*" -and $_.CommandLine -like "*Sysmon*") -or 
+    ($_.CommandLine -like "*main.py*" -and ($_.CommandLine -like "*Pulsar*" -or $_.CommandLine -like "*Sysmon*")) -or 
     ($_.CommandLine -like "*sysmon_service.vbs*") -or
+    ($_.CommandLine -like "*pulsar_service.vbs*") -or
     ($_.CommandLine -like "*debug_probe.py*" -and $_.ProcessId -ne $PID)
 }
 if ($oldProcs) {
     $hadPrevious = $true
-    Write-Host "  -> Arresto forzato di $($oldProcs.Count) processi Sysmon in background..." -ForegroundColor Yellow
+    Write-Host "  -> Arresto forzato di $($oldProcs.Count) processi in background..." -ForegroundColor Yellow
     foreach ($p in $oldProcs) {
         try { Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue } catch {}
     }
     Start-Sleep -Seconds 1
 }
 
-# C. Pulizia completa file obsoleti nella directory di installazione
-if (Test-Path $InstallDir) {
-    $hadPrevious = $true
-    Write-Host "  -> Pulizia file e moduli della versione precedente in $InstallDir..." -ForegroundColor Yellow
-    $filesToClean = @("sysmon_service.vbs", "main.py", "debug_probe.py", "requirements-agent.txt", "sysmon_buffer.db")
-    foreach ($f in $filesToClean) {
-        $fp = Join-Path $InstallDir $f
-        if (Test-Path $fp) { Remove-Item -Path $fp -Force -Recurse -ErrorAction SilentlyContinue }
-    }
-    $oldPkg = Join-Path $InstallDir "sysmon"
-    if (Test-Path $oldPkg) {
-        Remove-Item -Path $oldPkg -Force -Recurse -ErrorAction SilentlyContinue
-    }
-    Get-ChildItem -Path $InstallDir -Filter "__pycache__" -Recurse -Directory -ErrorAction SilentlyContinue | ForEach-Object {
-        Remove-Item -Path $_.FullName -Force -Recurse -ErrorAction SilentlyContinue
+foreach ($dir in @($InstallDir, $LegacyInstallDir)) {
+    if (Test-Path $dir) {
+        $hadPrevious = $true
+        Write-Host "  -> Pulizia file e moduli della versione precedente in $dir..." -ForegroundColor Yellow
+        $filesToClean = @("sysmon_service.vbs", "pulsar_service.vbs", "main.py", "debug_probe.py", "requirements-agent.txt", "sysmon_buffer.db", "pulsar_buffer.db")
+        foreach ($f in $filesToClean) {
+            $fp = Join-Path $dir $f
+            if (Test-Path $fp) { Remove-Item -Path $fp -Force -Recurse -ErrorAction SilentlyContinue }
+        }
+        foreach ($pkg in @("sysmon", "pulsar")) {
+            $oldPkg = Join-Path $dir $pkg
+            if (Test-Path $oldPkg) {
+                Remove-Item -Path $oldPkg -Force -Recurse -ErrorAction SilentlyContinue
+            }
+        }
+        Get-ChildItem -Path $dir -Filter "__pycache__" -Recurse -Directory -ErrorAction SilentlyContinue | ForEach-Object {
+            Remove-Item -Path $_.FullName -Force -Recurse -ErrorAction SilentlyContinue
+        }
     }
 }
 
 if ($hadPrevious) {
-    Write-Host "  -> Disinstallazione e pulizia completata con successo." -ForegroundColor Green
+    Write-Host "  -> Disinstallazione e pulizia versioni precedenti completata con successo." -ForegroundColor Green
 } else {
     Write-Host "  -> Nessuna versione precedente rilevata (installazione pulita)." -ForegroundColor Green
 }
@@ -252,7 +265,6 @@ if (-not $PythonCmd) {
         try {
             & winget install Python.Python.3.12 --silent --accept-package-agreements --accept-source-agreements
             Start-Sleep -Seconds 3
-            # Ricarica PATH per la sessione corrente
             $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
             $PythonCmd = Get-Command python.exe -ErrorAction SilentlyContinue
         } catch {
@@ -279,11 +291,11 @@ if (-not (Test-Path $InstallDir)) {
     New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
 }
 
-$hasLocalSources = (Test-Path (Join-Path $InstallDir "sysmon")) -and (Test-Path (Join-Path $InstallDir "main.py"))
+$hasLocalSources = ((Test-Path (Join-Path $InstallDir "pulsar")) -or (Test-Path (Join-Path $InstallDir "sysmon"))) -and (Test-Path (Join-Path $InstallDir "main.py"))
 if (-not $hasLocalSources) {
     Write-Host "  -> Download sorgenti aggiornati da GitHub ($GithubZipUrl)..." -ForegroundColor Cyan
-    $tempZip = Join-Path $env:TEMP "sysmon_source.zip"
-    $tempExtract = Join-Path $env:TEMP "sysmon_extracted"
+    $tempZip = Join-Path $env:TEMP "pulsar_source.zip"
+    $tempExtract = Join-Path $env:TEMP "pulsar_extracted"
     
     [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.SecurityProtocolType]::Tls12 -bor [System.Net.SecurityProtocolType]::Tls13
     Invoke-WebRequest -Uri $GithubZipUrl -OutFile $tempZip -UseBasicParsing
@@ -292,14 +304,25 @@ if (-not $hasLocalSources) {
     Expand-Archive -Path $tempZip -DestinationPath $tempExtract -Force
     
     $extractedRoot = Get-ChildItem -Path $tempExtract -Directory | Select-Object -First 1
-    if ($extractedRoot -and (Test-Path (Join-Path $extractedRoot.FullName "sysmon"))) {
-        Copy-Item -Path (Join-Path $extractedRoot.FullName "sysmon") -Destination $InstallDir -Recurse -Force
-        Copy-Item -Path (Join-Path $extractedRoot.FullName "main.py") -Destination $InstallDir -Force
-        if (Test-Path (Join-Path $extractedRoot.FullName "requirements-agent.txt")) {
-            Copy-Item -Path (Join-Path $extractedRoot.FullName "requirements-agent.txt") -Destination $InstallDir -Force
-        }
-        Write-Host "  -> Sorgenti estratti in $InstallDir con successo." -ForegroundColor Green
+    $srcRoot = if ($extractedRoot) { $extractedRoot.FullName } else { $tempExtract }
+    
+    if (Test-Path (Join-Path $srcRoot "pulsar")) {
+        Copy-Item -Path (Join-Path $srcRoot "pulsar") -Destination $InstallDir -Recurse -Force
     }
+    if (Test-Path (Join-Path $srcRoot "sysmon")) {
+        Copy-Item -Path (Join-Path $srcRoot "sysmon") -Destination $InstallDir -Recurse -Force
+    }
+    if (Test-Path (Join-Path $srcRoot "main.py")) {
+        Copy-Item -Path (Join-Path $srcRoot "main.py") -Destination $InstallDir -Force
+    }
+    if (Test-Path (Join-Path $srcRoot "requirements-agent.txt")) {
+        Copy-Item -Path (Join-Path $srcRoot "requirements-agent.txt") -Destination $InstallDir -Force
+    }
+    if (Test-Path (Join-Path $srcRoot "debug_probe.py")) {
+        Copy-Item -Path (Join-Path $srcRoot "debug_probe.py") -Destination $InstallDir -Force
+    }
+    Write-Host "  -> Sorgenti estratti in $InstallDir con successo." -ForegroundColor Green
+    
     Remove-Item -Path $tempZip -Force -ErrorAction SilentlyContinue
     Remove-Item -Path $tempExtract -Recurse -Force -ErrorAction SilentlyContinue
 }
@@ -328,8 +351,8 @@ Write-Host "  -> Dipendenze Python installate con successo nel virtualenv." -For
 # 4. Creazione File config.json
 Write-Host "`n[5/6] Configurazione parametri operativi (config.json) e test invio..." -ForegroundColor Yellow
 $ConfigFile = Join-Path $InstallDir "config.json"
-$BufferDbPath = Join-Path $InstallDir "sysmon_buffer.db"
-$LogFilePath = Join-Path $InstallDir "sysmon.log"
+$BufferDbPath = Join-Path $InstallDir "pulsar_buffer.db"
+$LogFilePath = Join-Path $InstallDir "pulsar.log"
 
 $configObj = @{
     server_url = $ServerUrl
@@ -356,11 +379,6 @@ Write-Host "  -> Server di destinazione: $ServerUrl" -ForegroundColor Cyan
 Write-Host "  -> Intervallo campionamento: ogni ${Interval}s" -ForegroundColor Cyan
 Write-Host "  -> File configurazione generato: $ConfigFile" -ForegroundColor Gray
 
-# Copia o scarica la sonda di debug
-if (Test-Path (Join-Path $tempExtract "debug_probe.py")) {
-    Copy-Item -Path (Join-Path $tempExtract "debug_probe.py") -Destination $InstallDir -Force
-}
-
 # Test di invio iniziale (--once)
 Write-Host "  -> Test di connessione e primo invio telemetria (--once)..." -ForegroundColor Yellow
 $testResult = & "$VenvDir\Scripts\python.exe" "$InstallDir\main.py" --config "$ConfigFile" --once 2>&1
@@ -381,7 +399,9 @@ if (-not (Test-Path $VenvPythonW)) { $VenvPythonW = $VenvPython }
 $MainPy = Join-Path $InstallDir "main.py"
 
 # Termina eventuali istanze precedenti
-Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like "*main.py*" -and $_.CommandLine -like "*Sysmon*" } | ForEach-Object {
+Get-CimInstance Win32_Process | Where-Object { 
+    $_.CommandLine -like "*main.py*" -and ($_.CommandLine -like "*Pulsar*" -or $_.CommandLine -like "*Sysmon*")
+} | ForEach-Object {
     Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
 }
 
@@ -392,7 +412,6 @@ if (Get-Command Register-ScheduledTask -ErrorAction SilentlyContinue) {
         
         $action = New-ScheduledTaskAction -Execute $VenvPythonW -Argument "`"$MainPy`" --config `"$ConfigFile`"" -WorkingDirectory $InstallDir
         
-        # Trigger multipli per garantire che la sonda sia sempre attiva:
         $triggerStartup = New-ScheduledTaskTrigger -AtStartup
         $triggerLogon = New-ScheduledTaskTrigger -AtLogOn
         $triggerWatchdog = New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes 5) -RepetitionDuration (New-TimeSpan -Days 9999)
@@ -449,9 +468,11 @@ if (Get-Command Start-ScheduledTask -ErrorAction SilentlyContinue) {
     cmd.exe /c "schtasks.exe /Run /TN $TaskName 2>nul" | Out-Null
 }
 
-# Garanzia di avvio immediato: se Task Scheduler ritarda l'esecuzione, avvia subito il processo in background
+# Garanzia di avvio immediato
 Start-Sleep -Seconds 2
-$runningProc = Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like "*main.py*" -and $_.CommandLine -like "*Sysmon*" }
+$runningProc = Get-CimInstance Win32_Process | Where-Object { 
+    $_.CommandLine -like "*main.py*" -and ($_.CommandLine -like "*Pulsar*" -or $_.CommandLine -like "*Sysmon*")
+}
 if (-not $runningProc) {
     Start-Process -FilePath $VenvPythonW -ArgumentList "`"$MainPy`" --config `"$ConfigFile`"" -WorkingDirectory $InstallDir -WindowStyle Hidden
 }
@@ -460,9 +481,11 @@ if (-not $runningProc) {
 Write-Host "`n[Verifica] Controllo operativita' agente e prima trasmissione..." -ForegroundColor Yellow
 Start-Sleep -Seconds 4
 
-$activeProc = Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like "*main.py*" -and $_.CommandLine -like "*Sysmon*" }
+$activeProc = Get-CimInstance Win32_Process | Where-Object { 
+    $_.CommandLine -like "*main.py*" -and ($_.CommandLine -like "*Pulsar*" -or $_.CommandLine -like "*Sysmon*")
+}
 if ($activeProc) {
-    Write-Host "  -> Agente Sysmon in esecuzione con PID: $($activeProc.ProcessId -join ', ')" -ForegroundColor Green
+    Write-Host "  -> Agente Pulsar in esecuzione con PID: $($activeProc.ProcessId -join ', ')" -ForegroundColor Green
 } else {
     Write-Host "  -> [ATTENZIONE] Il processo non risulta ancora visibile tra i processi attivi." -ForegroundColor Yellow
 }
@@ -475,7 +498,7 @@ if (Test-Path $LogFilePath) {
 Write-Host "`n==========================================================" -ForegroundColor Green
 Write-Host "    INSTALLAZIONE COMPLETATA CON SUCCESSO SU WINDOWS!      " -ForegroundColor Green
 Write-Host "==========================================================" -ForegroundColor Green
-Write-Host "L'agente Sysmon e' ora attivo e partira' automaticamente ad ogni avvio del PC." -ForegroundColor White
+Write-Host "L'agente Pulsar e' ora attivo e partira' automaticamente ad ogni avvio del PC." -ForegroundColor White
 Write-Host "  • Attivita' Pianificata:  $TaskName" -ForegroundColor Gray
 Write-Host "  • Directory di lavoro:    $InstallDir" -ForegroundColor Gray
 Write-Host "  • Log in tempo reale:     $LogFilePath" -ForegroundColor Gray

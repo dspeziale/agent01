@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Sysmon Diagnostic Probe & Live Debugger
+Pulsar Diagnostic Probe & Live Debugger
 Sonda interattiva per la diagnosi completa a video di connettività, certificati SSL,
 servizio locale, raccolta metriche e invio telemetria in tempo reale.
 """
@@ -68,10 +68,15 @@ def print_info(label: str, value: Any):
 # -----------------------------------------------------------------------------
 # 1. Rilevamento Configurazione Locale
 # -----------------------------------------------------------------------------
-def find_sysmon_installation() -> Tuple[Optional[str], Optional[Dict[str, Any]]]:
-    """Cerca l'installazione locale di Sysmon e carica config.json se presente."""
+def find_pulsar_installation() -> Tuple[Optional[str], Optional[Dict[str, Any]]]:
+    """Cerca l'installazione locale di Pulsar (o Sysmon) e carica config.json se presente."""
     candidate_dirs = [
         os.path.dirname(os.path.abspath(__file__)),
+        r"C:\Program Files\Pulsar",
+        r"C:\Pulsar",
+        "/opt/pulsar",
+        "/etc/pulsar",
+        os.path.expanduser("~/pulsar"),
         r"C:\Program Files\Sysmon",
         r"C:\Sysmon",
         "/opt/sysmon",
@@ -307,7 +312,7 @@ def send_metric_payload(url: str, payload: Dict[str, Any], api_key: Optional[str
     headers = {
         "Content-Type": "application/json",
         "Accept": "application/json",
-        "User-Agent": "SysmonDebugProbe/2.0.0",
+        "User-Agent": "PulsarDebugProbe/2.0.0",
     }
     if api_key:
         headers["X-API-Key"] = api_key
@@ -350,65 +355,76 @@ def verify_machine_on_server(server_base: str, machine_id: str) -> Optional[Dict
 def inspect_local_service(install_dir: Optional[str]):
     """Ispeziona lo stato del servizio Windows (Attività Pianificata) o Linux (systemd)."""
     if os.name == "nt":
-        # Windows: controlla Attività Pianificata SysmonAgent
+        # Windows: controlla Attività Pianificata PulsarAgent (o SysmonAgent)
         try:
             import subprocess
-            res = subprocess.run(
-                ["powershell", "-NoProfile", "-Command", "Get-ScheduledTask -TaskName SysmonAgent -ErrorAction SilentlyContinue | Select-Object TaskName, State, @{N='LastRun';E={(Get-ScheduledTaskInfo -TaskName $_.TaskName).LastRunTime}}, @{N='LastResult';E={(Get-ScheduledTaskInfo -TaskName $_.TaskName).LastTaskResult}} | Format-List"],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                timeout=5,
-            )
-            out = res.stdout.strip()
-            if out:
-                print_ok("Attivita' Pianificata 'SysmonAgent' rilevata nel sistema:")
-                for line in out.splitlines():
-                    if line.strip():
-                        print(f"    {C_CYAN}{line.strip()}{C_RESET}")
+            tasks_found = []
+            for t_name in ["PulsarAgent", "SysmonAgent"]:
+                res = subprocess.run(
+                    ["powershell", "-NoProfile", "-Command", f"Get-ScheduledTask -TaskName {t_name} -ErrorAction SilentlyContinue | Select-Object TaskName, State, @{{N='LastRun';E={{(Get-ScheduledTaskInfo -TaskName $_.TaskName).LastRunTime}}}}, @{{N='LastResult';E={{(Get-ScheduledTaskInfo -TaskName $_.TaskName).LastTaskResult}}}} | Format-List"],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    timeout=5,
+                )
+                out = res.stdout.strip()
+                if out:
+                    tasks_found.append((t_name, out))
+            if tasks_found:
+                for t_name, out in tasks_found:
+                    print_ok(f"Attivita' Pianificata '{t_name}' rilevata nel sistema:")
+                    for line in out.splitlines():
+                        if line.strip():
+                            print(f"    {C_CYAN}{line.strip()}{C_RESET}")
             else:
-                print_warn("Attivita' Pianificata 'SysmonAgent' NON registrata su questa macchina Windows!")
+                print_warn("Attivita' Pianificata 'PulsarAgent' NON registrata su questa macchina Windows!")
         except Exception as e:
             print_warn(f"Impossibile interrogare Task Scheduler: {e}")
     else:
-        # Linux: controlla systemd sysmon.service
+        # Linux: controlla systemd pulsar o sysmon
         try:
             import subprocess
-            res = subprocess.run(["systemctl", "is-active", "sysmon"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-            status = res.stdout.strip()
-            if status == "active":
-                print_ok(f"Servizio systemd 'sysmon': {C_GREEN}ATTIVO (in esecuzione){C_RESET}")
-            else:
-                print_warn(f"Servizio systemd 'sysmon': {status or 'NON ATTIVO'}")
+            found = False
+            for svc in ["pulsar", "sysmon"]:
+                res = subprocess.run(["systemctl", "is-active", svc], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                status = res.stdout.strip()
+                if status == "active":
+                    print_ok(f"Servizio systemd '{svc}': {C_GREEN}ATTIVO (in esecuzione){C_RESET}")
+                    found = True
+                    break
+            if not found:
+                print_warn("Servizio systemd 'pulsar': NON ATTIVO")
         except Exception as e:
             print_warn(f"Impossibile verificare systemd: {e}")
 
     # Ispezione log locale
     if install_dir:
-        log_file = os.path.join(install_dir, "sysmon.log")
-        if os.path.isfile(log_file):
-            print_info("File di Log locale trovato", log_file)
-            try:
-                with open(log_file, "r", encoding="utf-8", errors="ignore") as lf:
-                    lines = lf.readlines()
-                if lines:
-                    last_lines = [l.rstrip() for l in lines[-10:] if l.strip()]
-                    print(f"  {C_GRAY}--- Ultime righe di {log_file} ---{C_RESET}")
-                    for l in last_lines:
-                        col = C_RED if "ERROR" in l else (C_YELLOW if "WARN" in l else C_GRAY)
-                        print(f"    {col}{l}{C_RESET}")
-                    print(f"  {C_GRAY}------------------------------------{C_RESET}")
-                else:
-                    print_info("File di Log", "Presente ma vuoto (nessun evento scritto finora)")
-            except Exception as e:
-                print_warn(f"Impossibile leggere sysmon.log: {e}")
+        for lf_name in ["pulsar.log", "sysmon.log"]:
+            log_file = os.path.join(install_dir, lf_name)
+            if os.path.isfile(log_file):
+                print_info("File di Log locale trovato", log_file)
+                try:
+                    with open(log_file, "r", encoding="utf-8", errors="ignore") as lf:
+                        lines = lf.readlines()
+                    if lines:
+                        last_lines = [l.rstrip() for l in lines[-10:] if l.strip()]
+                        print(f"  {C_GRAY}--- Ultime righe di {log_file} ---{C_RESET}")
+                        for l in last_lines:
+                            col = C_RED if "ERROR" in l else (C_YELLOW if "WARN" in l else C_GRAY)
+                            print(f"    {col}{l}{C_RESET}")
+                        print(f"  {C_GRAY}------------------------------------{C_RESET}")
+                    else:
+                        print_info("File di Log", "Presente ma vuoto (nessun evento scritto finora)")
+                except Exception as e:
+                    print_warn(f"Impossibile leggere {lf_name}: {e}")
+                break
 
 
 # -----------------------------------------------------------------------------
 # MAIN
 # -----------------------------------------------------------------------------
 def main():
-    print_header("SYSMON TELEMETRY - SONDA DI DIAGNOSTICA INTERATTIVA")
+    print_header("PULSAR TELEMETRY - SONDA DI DIAGNOSTICA INTERATTIVA")
     print(f"{C_GRAY}Questa sonda verifica ogni livello (ambiente, DNS, TCP, SSL, log, servizio, invio HTTP){C_RESET}")
     print(f"{C_GRAY}e mantiene una sessione attiva a video con l'esito di ogni pacchetto telemetrico.{C_RESET}")
 
@@ -426,10 +442,10 @@ def main():
     print_info("Ambiente Virtuale (.venv)", f"{C_GREEN}SI (Attivo){C_RESET}" if in_venv else f"{C_YELLOW}NO (Python globale di sistema){C_RESET}")
 
     # 2. Ricerca installazione
-    print_step("2/6", "Verifica Installazione e Stato Servizio Sysmon")
-    install_dir, cfg = find_sysmon_installation()
+    print_step("2/6", "Verifica Installazione e Stato Servizio Pulsar")
+    install_dir, cfg = find_pulsar_installation()
     if install_dir:
-        print_ok(f"Directory installazione Sysmon trovata: {C_CYAN}{install_dir}{C_RESET}")
+        print_ok(f"Directory installazione Pulsar trovata: {C_CYAN}{install_dir}{C_RESET}")
     else:
         print_warn("Directory installazione standard non trovata (la sonda opererà in modalità standalone).")
 

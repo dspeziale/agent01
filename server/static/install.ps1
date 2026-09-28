@@ -1,6 +1,6 @@
 <#
 ==============================================================================
-Sysmon Agent - Remote Installer per Windows
+Pulsar Agent - Remote Installer per Windows
 Da eseguire in PowerShell come Amministratore
 
 Comando one-liner:
@@ -13,17 +13,18 @@ Oppure:
 $ErrorActionPreference = "Stop"
 
 # Parametri operativi
-$ServerUrl = if ($env:SYSMON_SERVER) { $env:SYSMON_SERVER } else { "https://simei.dsc-italy.app" }
+$ServerUrl = if ($env:PULSAR_SERVER) { $env:PULSAR_SERVER } elseif ($env:SYSMON_SERVER) { $env:SYSMON_SERVER } else { "https://simei.dsc-italy.app" }
 $MetricsUrl = "$ServerUrl/api/v1/metrics"
 $DownloadUrl = "$ServerUrl/download/agent.zip"
 $FallbackZipUrl = "https://github.com/dspeziale/agent01/archive/refs/heads/main.zip"
-$InstallDir = "C:\Program Files\Sysmon"
-$TaskName = "SysmonAgent"
+$InstallDir = "C:\Program Files\Pulsar"
+$LegacyInstallDir = "C:\Program Files\Sysmon"
+$TaskName = "PulsarAgent"
 $Interval = 15
 
 Clear-Host
 Write-Host "==========================================================" -ForegroundColor Cyan
-Write-Host "   SYSMON AGENT - INSTALLAZIONE REMOTA WINDOWS (Admin)    " -ForegroundColor Cyan
+Write-Host "   PULSAR AGENT - INSTALLAZIONE REMOTA WINDOWS (Admin)    " -ForegroundColor Cyan
 Write-Host "==========================================================`n" -ForegroundColor Cyan
 
 # 1. Verifica privilegi di Amministratore
@@ -38,13 +39,13 @@ if (-not $isAdmin) {
     return
 }
 
-# 2. Disinstallazione completa di qualsiasi versione precedente
+# 2. Disinstallazione completa di qualsiasi versione precedente (Pulsar e Sysmon)
 Write-Host "[1/6] Verifica e rimozione completa di versioni precedenti..." -ForegroundColor Yellow
 
 $hadPrevious = $false
 
-# A. Arresto e rimozione di tutte le Attività Pianificate Sysmon
-$tasksToCheck = @($TaskName, "${TaskName}_Watchdog", "Sysmon")
+# A. Arresto e rimozione di tutte le Attività Pianificate (sia Pulsar che legacy Sysmon)
+$tasksToCheck = @("PulsarAgent", "PulsarAgent_Watchdog", "Pulsar", "SysmonAgent", "SysmonAgent_Watchdog", "Sysmon")
 foreach ($t in $tasksToCheck) {
     $exists = $false
     if (Get-Command Get-ScheduledTask -ErrorAction SilentlyContinue) {
@@ -70,45 +71,51 @@ foreach ($t in $tasksToCheck) {
 
 # B. Terminazione forzata di qualsiasi processo precedente attivo
 $oldProcs = Get-CimInstance Win32_Process | Where-Object { 
-    ($_.CommandLine -like "*main.py*" -and $_.CommandLine -like "*Sysmon*") -or 
+    ($_.CommandLine -like "*main.py*" -and ($_.CommandLine -like "*Pulsar*" -or $_.CommandLine -like "*Sysmon*")) -or 
     ($_.CommandLine -like "*sysmon_service.vbs*") -or
+    ($_.CommandLine -like "*pulsar_service.vbs*") -or
     ($_.CommandLine -like "*debug_probe.py*" -and $_.ProcessId -ne $PID)
 }
 if ($oldProcs) {
     $hadPrevious = $true
-    Write-Host "  -> Arresto forzato di $($oldProcs.Count) processi Sysmon in background..." -ForegroundColor Yellow
+    Write-Host "  -> Arresto forzato di $($oldProcs.Count) processi residui in background..." -ForegroundColor Yellow
     foreach ($p in $oldProcs) {
         try { Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue } catch {}
     }
     Start-Sleep -Seconds 1
 }
 
-# C. Pulizia completa file obsoleti nella directory di installazione
-if (Test-Path $InstallDir) {
-    $hadPrevious = $true
-    Write-Host "  -> Pulizia file e moduli della versione precedente in $InstallDir..." -ForegroundColor Yellow
-    
-    # Rimuove file di codice e script legacy
-    $filesToClean = @("sysmon_service.vbs", "main.py", "debug_probe.py", "requirements-agent.txt", "sysmon_buffer.db")
-    foreach ($f in $filesToClean) {
-        $fp = Join-Path $InstallDir $f
-        if (Test-Path $fp) { Remove-Item -Path $fp -Force -Recurse -ErrorAction SilentlyContinue }
-    }
-    
-    # Rimuove l'intero modulo sysmon per evitare file sorgente orfani
-    $oldPkg = Join-Path $InstallDir "sysmon"
-    if (Test-Path $oldPkg) {
-        Remove-Item -Path $oldPkg -Force -Recurse -ErrorAction SilentlyContinue
-    }
-    
-    # Rimuove cartelle __pycache__
-    Get-ChildItem -Path $InstallDir -Filter "__pycache__" -Recurse -Directory -ErrorAction SilentlyContinue | ForEach-Object {
-        Remove-Item -Path $_.FullName -Force -Recurse -ErrorAction SilentlyContinue
+# C. Pulizia completa file obsoleti nelle directory di installazione
+$dirsToClean = @($InstallDir, $LegacyInstallDir)
+foreach ($dir in $dirsToClean) {
+    if (Test-Path $dir) {
+        $hadPrevious = $true
+        Write-Host "  -> Pulizia file e moduli della versione precedente in $dir..." -ForegroundColor Yellow
+        
+        # Rimuove file di codice e script legacy
+        $filesToClean = @("sysmon_service.vbs", "pulsar_service.vbs", "main.py", "debug_probe.py", "requirements-agent.txt", "sysmon_buffer.db", "pulsar_buffer.db")
+        foreach ($f in $filesToClean) {
+            $fp = Join-Path $dir $f
+            if (Test-Path $fp) { Remove-Item -Path $fp -Force -Recurse -ErrorAction SilentlyContinue }
+        }
+        
+        # Rimuove moduli codice precedenti
+        foreach ($pkg in @("sysmon", "pulsar")) {
+            $oldPkg = Join-Path $dir $pkg
+            if (Test-Path $oldPkg) {
+                Remove-Item -Path $oldPkg -Force -Recurse -ErrorAction SilentlyContinue
+            }
+        }
+        
+        # Rimuove cartelle __pycache__
+        Get-ChildItem -Path $dir -Filter "__pycache__" -Recurse -Directory -ErrorAction SilentlyContinue | ForEach-Object {
+            Remove-Item -Path $_.FullName -Force -Recurse -ErrorAction SilentlyContinue
+        }
     }
 }
 
 if ($hadPrevious) {
-    Write-Host "  -> Disinstallazione e pulizia completata con successo." -ForegroundColor Green
+    Write-Host "  -> Disinstallazione e pulizia versioni precedenti completata con successo." -ForegroundColor Green
 } else {
     Write-Host "  -> Nessuna versione precedente rilevata (installazione pulita)." -ForegroundColor Green
 }
@@ -147,8 +154,8 @@ if (-not (Test-Path $InstallDir)) {
     New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
 }
 
-$tempZip = Join-Path $env:TEMP "sysmon_remote_agent.zip"
-$tempExtract = Join-Path $env:TEMP "sysmon_remote_extract"
+$tempZip = Join-Path $env:TEMP "pulsar_remote_agent.zip"
+$tempExtract = Join-Path $env:TEMP "pulsar_remote_extract"
 if (Test-Path $tempExtract) { Remove-Item -Path $tempExtract -Recurse -Force -ErrorAction SilentlyContinue }
 
 [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.SecurityProtocolType]::Tls12 -bor [System.Net.SecurityProtocolType]::Tls13
@@ -172,28 +179,28 @@ Expand-Archive -Path $tempZip -DestinationPath $tempExtract -Force
 Remove-Item -Path $tempZip -Force -ErrorAction SilentlyContinue
 
 # Copia i file nella cartella di destinazione
-if (Test-Path (Join-Path $tempExtract "sysmon")) {
-    Copy-Item -Path (Join-Path $tempExtract "sysmon") -Destination $InstallDir -Recurse -Force
-    Copy-Item -Path (Join-Path $tempExtract "main.py") -Destination $InstallDir -Force
-    if (Test-Path (Join-Path $tempExtract "requirements-agent.txt")) {
-        Copy-Item -Path (Join-Path $tempExtract "requirements-agent.txt") -Destination $InstallDir -Force
-    }
-    if (Test-Path (Join-Path $tempExtract "debug_probe.py")) {
-        Copy-Item -Path (Join-Path $tempExtract "debug_probe.py") -Destination $InstallDir -Force
-    }
-} else {
+$sourceRoot = $tempExtract
+if (-not (Test-Path (Join-Path $tempExtract "pulsar")) -and -not (Test-Path (Join-Path $tempExtract "sysmon"))) {
     $subDir = Get-ChildItem -Path $tempExtract -Directory | Select-Object -First 1
-    if ($subDir -and (Test-Path (Join-Path $subDir.FullName "sysmon"))) {
-        Copy-Item -Path (Join-Path $subDir.FullName "sysmon") -Destination $InstallDir -Recurse -Force
-        Copy-Item -Path (Join-Path $subDir.FullName "main.py") -Destination $InstallDir -Force
-        if (Test-Path (Join-Path $subDir.FullName "requirements-agent.txt")) {
-            Copy-Item -Path (Join-Path $subDir.FullName "requirements-agent.txt") -Destination $InstallDir -Force
-        }
-        if (Test-Path (Join-Path $subDir.FullName "debug_probe.py")) {
-            Copy-Item -Path (Join-Path $subDir.FullName "debug_probe.py") -Destination $InstallDir -Force
-        }
-    }
+    if ($subDir) { $sourceRoot = $subDir.FullName }
 }
+
+if (Test-Path (Join-Path $sourceRoot "pulsar")) {
+    Copy-Item -Path (Join-Path $sourceRoot "pulsar") -Destination $InstallDir -Recurse -Force
+}
+if (Test-Path (Join-Path $sourceRoot "sysmon")) {
+    Copy-Item -Path (Join-Path $sourceRoot "sysmon") -Destination $InstallDir -Recurse -Force
+}
+if (Test-Path (Join-Path $sourceRoot "main.py")) {
+    Copy-Item -Path (Join-Path $sourceRoot "main.py") -Destination $InstallDir -Force
+}
+if (Test-Path (Join-Path $sourceRoot "requirements-agent.txt")) {
+    Copy-Item -Path (Join-Path $sourceRoot "requirements-agent.txt") -Destination $InstallDir -Force
+}
+if (Test-Path (Join-Path $sourceRoot "debug_probe.py")) {
+    Copy-Item -Path (Join-Path $sourceRoot "debug_probe.py") -Destination $InstallDir -Force
+}
+
 Remove-Item -Path $tempExtract -Recurse -Force -ErrorAction SilentlyContinue
 Write-Host "  -> File dell'agente posizionati in $InstallDir" -ForegroundColor Green
 
@@ -219,8 +226,8 @@ Write-Host "  -> Dipendenze psutil e requests installate con successo." -Foregro
 # 6. Generazione config.json e test iniziale
 Write-Host "`n[5/6] Configurazione parametri operativi (config.json) e test invio..." -ForegroundColor Yellow
 $ConfigFile = Join-Path $InstallDir "config.json"
-$BufferDbPath = Join-Path $InstallDir "sysmon_buffer.db"
-$LogFilePath = Join-Path $InstallDir "sysmon.log"
+$BufferDbPath = Join-Path $InstallDir "pulsar_buffer.db"
+$LogFilePath = Join-Path $InstallDir "pulsar.log"
 
 $configObj = @{
     server_url = $MetricsUrl
@@ -245,10 +252,8 @@ $utf8NoBom = New-Object System.Text.UTF8Encoding $false
 Write-Host "  -> Endpoint metriche: $MetricsUrl" -ForegroundColor Cyan
 Write-Host "  -> Frequenza invio: ogni ${Interval}s" -ForegroundColor Cyan
 
-# Copia / Download sonda di debug
-if (Test-Path (Join-Path $tempExtract "debug_probe.py")) {
-    Copy-Item -Path (Join-Path $tempExtract "debug_probe.py") -Destination $InstallDir -Force
-} else {
+# Assicura presenza di debug_probe.py
+if (-not (Test-Path (Join-Path $InstallDir "debug_probe.py"))) {
     try {
         Invoke-WebRequest -Uri "$ServerUrl/debug.py" -OutFile (Join-Path $InstallDir "debug_probe.py") -UseBasicParsing -TimeoutSec 10 -ErrorAction SilentlyContinue
     } catch {}
@@ -274,7 +279,7 @@ if (-not (Test-Path $VenvPythonW)) { $VenvPythonW = $VenvPython }
 $MainPy = Join-Path $InstallDir "main.py"
 
 # Termina eventuali istanze precedenti
-Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like "*main.py*" -and $_.CommandLine -like "*Sysmon*" } | ForEach-Object {
+Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like "*main.py*" -and ($_.CommandLine -like "*Pulsar*" -or $_.CommandLine -like "*Sysmon*") } | ForEach-Object {
     Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
 }
 
@@ -296,12 +301,7 @@ if (Get-Command Register-ScheduledTask -ErrorAction SilentlyContinue) {
 
         $principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
         
-        # Impostazioni di massima affidabilità:
-        # - Non fermare su batteria
-        # - Non fermare al termine dell'idle (DontStopOnIdleEnd)
-        # - Riavvio automatico fino a 999 volte in caso di interruzione (RestartCount 999, intervallo 1 minuto)
-        # - Nessun limite di esecuzione forzata (ExecutionTimeLimit Zero)
-        # - Ignora nuove istanze se già attivo (MultipleInstances IgnoreNew)
+        # Impostazioni di massima affidabilità
         $settings = New-ScheduledTaskSettingsSet `
             -AllowStartIfOnBatteries `
             -DontStopIfGoingOnBatteries `
@@ -354,7 +354,7 @@ if (Get-Command Start-ScheduledTask -ErrorAction SilentlyContinue) {
 
 # Garanzia di avvio immediato: se Task Scheduler ritarda l'esecuzione, avvia subito il processo in background
 Start-Sleep -Seconds 2
-$runningProc = Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like "*main.py*" -and $_.CommandLine -like "*Sysmon*" }
+$runningProc = Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like "*main.py*" -and ($_.CommandLine -like "*Pulsar*" -or $_.CommandLine -like "*Sysmon*") }
 if (-not $runningProc) {
     Start-Process -FilePath $VenvPythonW -ArgumentList "`"$MainPy`" --config `"$ConfigFile`"" -WorkingDirectory $InstallDir -WindowStyle Hidden
 }
@@ -363,9 +363,9 @@ if (-not $runningProc) {
 Write-Host "`n[Verifica] Controllo operativita' agente e prima trasmissione..." -ForegroundColor Yellow
 Start-Sleep -Seconds 4
 
-$activeProc = Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like "*main.py*" -and $_.CommandLine -like "*Sysmon*" }
+$activeProc = Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like "*main.py*" -and ($_.CommandLine -like "*Pulsar*" -or $_.CommandLine -like "*Sysmon*") }
 if ($activeProc) {
-    Write-Host "  -> Agente Sysmon in esecuzione con PID: $($activeProc.ProcessId -join ', ')" -ForegroundColor Green
+    Write-Host "  -> Agente Pulsar in esecuzione con PID: $($activeProc.ProcessId -join ', ')" -ForegroundColor Green
 } else {
     Write-Host "  -> [ATTENZIONE] Il processo non risulta ancora visibile tra i processi attivi." -ForegroundColor Yellow
 }
@@ -378,7 +378,7 @@ if (Test-Path $LogFilePath) {
 Write-Host "`n==========================================================" -ForegroundColor Green
 Write-Host "    INSTALLAZIONE COMPLETATA CON SUCCESSO SU WINDOWS!      " -ForegroundColor Green
 Write-Host "==========================================================" -ForegroundColor Green
-Write-Host "L'agente telemetria e' ora operativo in background e partira' ad ogni boot." -ForegroundColor White
+Write-Host "L'agente Pulsar e' ora operativo in background e partira' ad ogni boot." -ForegroundColor White
 Write-Host "  • Dashboard Web:         $ServerUrl" -ForegroundColor Cyan
 Write-Host "  • Cartella installazione: $InstallDir" -ForegroundColor Gray
 Write-Host "  • File di Log:           $LogFilePath" -ForegroundColor Gray

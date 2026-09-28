@@ -1,6 +1,6 @@
 <#
 ==============================================================================
-Sysmon Telemetry - Launcher Sonda di Debug a Video (Windows)
+Pulsar Telemetry - Launcher Sonda di Debug a Video (Windows)
 Esecuzione rapida:
   irm https://simei.dsc-italy.app/debug.ps1 | iex
 ==============================================================================
@@ -9,16 +9,20 @@ Esecuzione rapida:
 $ErrorActionPreference = "Continue"
 
 Write-Host "`n==========================================================" -ForegroundColor Cyan
-Write-Host "   SYSMON TELEMETRY - AVVIO SONDA DI DEBUG A VIDEO       " -ForegroundColor Cyan
+Write-Host "   PULSAR TELEMETRY - AVVIO SONDA DI DEBUG A VIDEO       " -ForegroundColor Cyan
 Write-Host "==========================================================`n" -ForegroundColor Cyan
 
 # 1. Rileva il miglior interprete Python disponibile
-$VenvPy = "C:\Program Files\Sysmon\.venv\Scripts\python.exe"
+$PulsarVenvPy = "C:\Program Files\Pulsar\.venv\Scripts\python.exe"
+$SysmonVenvPy = "C:\Program Files\Sysmon\.venv\Scripts\python.exe"
 $PythonExe = $null
 
-if (Test-Path $VenvPy) {
-    Write-Host "[1/2] Rilevato ambiente virtuale dedicato Sysmon: $VenvPy" -ForegroundColor Green
-    $PythonExe = $VenvPy
+if (Test-Path $PulsarVenvPy) {
+    Write-Host "[1/2] Rilevato ambiente virtuale dedicato Pulsar: $PulsarVenvPy" -ForegroundColor Green
+    $PythonExe = $PulsarVenvPy
+} elseif (Test-Path $SysmonVenvPy) {
+    Write-Host "[1/2] Rilevato ambiente virtuale legacy Sysmon: $SysmonVenvPy" -ForegroundColor Yellow
+    $PythonExe = $SysmonVenvPy
 } else {
     $SysPy = Get-Command python.exe -ErrorAction SilentlyContinue
     if ($SysPy) {
@@ -35,16 +39,20 @@ if (-not $PythonExe) {
 }
 
 # 2. Download o caricamento script di debug
-$ServerUrl = if ($env:SYSMON_SERVER) { $env:SYSMON_SERVER } else { "https://simei.dsc-italy.app" }
+$ServerUrl = if ($env:PULSAR_SERVER) { $env:PULSAR_SERVER } elseif ($env:SYSMON_SERVER) { $env:SYSMON_SERVER } else { "https://simei.dsc-italy.app" }
 $DebugScriptUrl = "$ServerUrl/debug.py"
-$LocalScript = "C:\Program Files\Sysmon\debug_probe.py"
-$TempScript = Join-Path $env:TEMP "sysmon_debug_probe.py"
+$LocalPulsarScript = "C:\Program Files\Pulsar\debug_probe.py"
+$LocalSysmonScript = "C:\Program Files\Sysmon\debug_probe.py"
+$TempScript = Join-Path $env:TEMP "pulsar_debug_probe.py"
 
 $TargetScript = $null
 
-if (Test-Path $LocalScript) {
-    $TargetScript = $LocalScript
-    Write-Host "[2/2] Utilizzo sonda locale: $LocalScript" -ForegroundColor Green
+if (Test-Path $LocalPulsarScript) {
+    $TargetScript = $LocalPulsarScript
+    Write-Host "[2/2] Utilizzo sonda locale Pulsar: $LocalPulsarScript" -ForegroundColor Green
+} elseif (Test-Path $LocalSysmonScript) {
+    $TargetScript = $LocalSysmonScript
+    Write-Host "[2/2] Utilizzo sonda locale Sysmon: $LocalSysmonScript" -ForegroundColor Yellow
 } else {
     Write-Host "[2/2] Download sonda aggiornata da $DebugScriptUrl..." -ForegroundColor Yellow
     try {

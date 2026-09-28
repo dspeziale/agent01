@@ -1,5 +1,5 @@
 """
-Sysmon Production Telemetry Server (FastAPI + PostgreSQL)
+Pulsar Production Telemetry Server (FastAPI + PostgreSQL)
 Fornisce gli endpoint HTTPS per l'ingestion della telemetria, il monitoraggio delle macchine,
 e le serie storiche per dashboard, pronto per il deploy su Coolify.
 """
@@ -25,16 +25,16 @@ from .db import DatabaseManager
 # Configurazione logging strutturato
 logging.basicConfig(
     level=getattr(logging, os.environ.get("LOG_LEVEL", "INFO").upper(), logging.INFO),
-    format="[%(asctime)s] [%(levelname)s] [SYSMON-SERVER] %(message)s",
+    format="[%(asctime)s] [%(levelname)s] [PULSAR-SERVER] %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
 )
-logger = logging.getLogger("sysmon.server")
+logger = logging.getLogger("pulsar.server")
 
 # Inizializzazione Database Manager
 db = DatabaseManager()
 
 # Token di sicurezza opzionale configurabile da variabile d'ambiente
-SERVER_AUTH_TOKEN = os.environ.get("SYSMON_SERVER_TOKEN")
+SERVER_AUTH_TOKEN = os.environ.get("PULSAR_SERVER_TOKEN") or os.environ.get("SYSMON_SERVER_TOKEN")
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 
 
@@ -66,7 +66,7 @@ def verify_auth_token(
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Gestione ciclo di vita dell'applicazione: auto-inizializzazione schema PostgreSQL."""
-    logger.info("Avvio del server Sysmon Telemetry...")
+    logger.info("Avvio del server Pulsar Telemetry...")
     try:
         if db.check_health():
             db.init_db()
@@ -76,11 +76,11 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"PostgreSQL non ancora raggiungibile all'avvio: {e}")
     yield
-    logger.info("Arresto del server Sysmon Telemetry.")
+    logger.info("Arresto del server Pulsar Telemetry.")
 
 
 app = FastAPI(
-    title="Sysmon Telemetry Server",
+    title="Pulsar Telemetry Server",
     description="Backend definitivo ad alte prestazioni per la telemetria di sistema su Coolify e PostgreSQL.",
     version="2.0.0",
     lifespan=lifespan,
@@ -111,22 +111,31 @@ def ensure_agent_bundle(format_type: str) -> Optional[str]:
     if os.path.isfile(bundle_path) and os.path.getsize(bundle_path) > 0:
         return bundle_path
 
-    # Trova i sorgenti dell'agente (cartella sysmon, main.py, requirements-agent.txt)
+    # Trova i sorgenti dell'agente (cartelle pulsar/sysmon, main.py, requirements-agent.txt)
     possible_roots = [
         os.path.abspath(os.path.join(os.path.dirname(__file__), "..")),
         "/app",
         os.getcwd(),
     ]
-    sysmon_dir = None
+    pkg_dir = None
+    pkg_name = "pulsar"
     main_file = None
     req_file = None
     debug_file = None
     for root in possible_roots:
+        cand_pulsar = os.path.join(root, "pulsar")
         cand_sysmon = os.path.join(root, "sysmon")
         cand_main = os.path.join(root, "main.py")
-        if os.path.isdir(cand_sysmon) and os.path.isfile(cand_main):
-            sysmon_dir = cand_sysmon
+        if os.path.isdir(cand_pulsar) and os.path.isfile(cand_main):
+            pkg_dir = cand_pulsar
+            pkg_name = "pulsar"
             main_file = cand_main
+        elif os.path.isdir(cand_sysmon) and os.path.isfile(cand_main):
+            pkg_dir = cand_sysmon
+            pkg_name = "sysmon"
+            main_file = cand_main
+
+        if pkg_dir and main_file:
             cand_req = os.path.join(root, "requirements-agent.txt")
             if os.path.isfile(cand_req):
                 req_file = cand_req
@@ -135,14 +144,18 @@ def ensure_agent_bundle(format_type: str) -> Optional[str]:
                 debug_file = cand_dbg
             break
 
-    if not sysmon_dir or not main_file:
-        logger.warning("Impossibile generare bundle: sorgenti sysmon non trovati.")
+    if not pkg_dir or not main_file:
+        logger.warning("Impossibile generare bundle: sorgenti pulsar non trovati.")
         return None
 
     try:
         if format_type == "tar.gz":
             with tarfile.open(bundle_path, "w:gz") as tar:
-                tar.add(sysmon_dir, arcname="sysmon")
+                tar.add(pkg_dir, arcname=pkg_name)
+                # Includi anche l'alias sysmon se presente
+                alt_dir = os.path.join(os.path.dirname(pkg_dir), "sysmon" if pkg_name == "pulsar" else "pulsar")
+                if os.path.isdir(alt_dir):
+                    tar.add(alt_dir, arcname="sysmon" if pkg_name == "pulsar" else "pulsar")
                 tar.add(main_file, arcname="main.py")
                 if req_file:
                     tar.add(req_file, arcname="requirements-agent.txt")
@@ -152,13 +165,24 @@ def ensure_agent_bundle(format_type: str) -> Optional[str]:
             return bundle_path
         elif format_type == "zip":
             with zipfile.ZipFile(bundle_path, "w", zipfile.ZIP_DEFLATED) as zipf:
-                for root_dir, _, files in os.walk(sysmon_dir):
-                    if "__pycache__" in root_dir:
-                        continue
-                    for file in files:
-                        p = os.path.join(root_dir, file)
-                        rel_path = os.path.relpath(p, os.path.dirname(sysmon_dir))
-                        zipf.write(p, rel_path)
+                for target_dir, target_arc in [(pkg_dir, pkg_name)]:
+                    for root_dir, _, files in os.walk(target_dir):
+                        if "__pycache__" in root_dir:
+                            continue
+                        for file in files:
+                            p = os.path.join(root_dir, file)
+                            rel_path = os.path.relpath(p, os.path.dirname(target_dir))
+                            zipf.write(p, rel_path)
+                # Includi anche l'alias se presente
+                alt_dir = os.path.join(os.path.dirname(pkg_dir), "sysmon" if pkg_name == "pulsar" else "pulsar")
+                if os.path.isdir(alt_dir):
+                    for root_dir, _, files in os.walk(alt_dir):
+                        if "__pycache__" in root_dir:
+                            continue
+                        for file in files:
+                            p = os.path.join(root_dir, file)
+                            rel_path = os.path.relpath(p, os.path.dirname(alt_dir))
+                            zipf.write(p, rel_path)
                 zipf.write(main_file, "main.py")
                 if req_file:
                     zipf.write(req_file, "requirements-agent.txt")
@@ -179,7 +203,7 @@ async def serve_dashboard():
     index_file = os.path.join(static_dir, "index.html")
     if os.path.isfile(index_file):
         return FileResponse(index_file)
-    return HTMLResponse("<h1>Sysmon Dashboard</h1><p>Interfaccia in fase di inizializzazione...</p>")
+    return HTMLResponse("<h1>Pulsar Dashboard</h1><p>Interfaccia in fase di inizializzazione...</p>")
 
 
 @app.get("/install.sh")
@@ -250,6 +274,7 @@ async def serve_debug_sh():
 
 
 @app.get("/download/agent.tar.gz")
+@app.get("/download/pulsar-agent.tar.gz")
 async def download_agent_tar():
     """Endpoint per scaricare il pacchetto tar.gz dell'agente."""
     bundle = ensure_agent_bundle("tar.gz")
@@ -257,13 +282,14 @@ async def download_agent_tar():
         return FileResponse(
             bundle,
             media_type="application/gzip",
-            filename="sysmon-agent.tar.gz",
+            filename="pulsar-agent.tar.gz",
             headers={"Cache-Control": "public, max-age=3600"},
         )
     raise HTTPException(status_code=404, detail="Bundle agent.tar.gz non disponibile")
 
 
 @app.get("/download/agent.zip")
+@app.get("/download/pulsar-agent.zip")
 async def download_agent_zip():
     """Endpoint per scaricare il pacchetto zip dell'agente."""
     bundle = ensure_agent_bundle("zip")
@@ -271,10 +297,11 @@ async def download_agent_zip():
         return FileResponse(
             bundle,
             media_type="application/zip",
-            filename="sysmon-agent.zip",
+            filename="pulsar-agent.zip",
             headers={"Cache-Control": "public, max-age=3600"},
         )
     raise HTTPException(status_code=404, detail="Bundle agent.zip non disponibile")
+
 
 
 
@@ -289,7 +316,7 @@ async def health_check():
         )
     return {
         "status": "healthy",
-        "service": "sysmon-server",
+        "service": "pulsar-server",
         "version": "2.0.0",
         "database": "connected",
         "server_time_utc": datetime.now(timezone.utc).isoformat(),
@@ -300,7 +327,7 @@ async def health_check():
 async def receive_metrics(payload: Dict[str, Any], authenticated: bool = Depends(verify_auth_token)):
     """
     Endpoint primario di ingestione telemetria.
-    Riceve il payload JSON trasmesso dall'agente Sysmon e lo salva atomicamente su PostgreSQL.
+    Riceve il payload JSON trasmesso dall'agente Pulsar e lo salva atomicamente su PostgreSQL.
     """
     try:
         snapshot_id = db.save_telemetry(payload)

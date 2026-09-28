@@ -1,0 +1,5 @@
+# Enforce LF endings on shell scripts
+*.sh text eol=lf
+*.py text
+*.ps1 text
+*.bat text

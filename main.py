@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Sysmon - Script di avvio rapido.
+Pulsar - Script di avvio rapido.
 Riconosce ed esegue automaticamente l'ambiente virtuale locale (.venv) se presente.
 """
 
@@ -33,7 +33,10 @@ def _ensure_virtualenv():
 _ensure_virtualenv()
 
 try:
-    from sysmon.__main__ import main
+    try:
+        from pulsar.__main__ import main
+    except ModuleNotFoundError:
+        from sysmon.__main__ import main
 except ModuleNotFoundError as e:
     missing_mod = getattr(e, "name", str(e))
     print(f"\n[ERRORE] Modulo mancante: {missing_mod}")

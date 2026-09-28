@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# Sysmon Agent - Script di Installazione Completo per Linux (Systemd Service)
+# Pulsar Agent - Script di Installazione Completo per Linux (Systemd Service)
 # Supporta: Debian, Ubuntu, CentOS, RHEL, Rocky, AlmaLinux, Fedora, Arch, Alpine, openSUSE
 #
 # Esecuzione rapida da remoto (one-liner):
@@ -23,8 +23,9 @@ NC='\033[0m' # No Color
 SERVER_URL="https://simei.dsc-italy.app/api/v1/metrics"
 TOKEN=""
 INTERVAL=15
-INSTALL_DIR="/opt/sysmon"
-SERVICE_NAME="sysmon.service"
+INSTALL_DIR="/opt/pulsar"
+LEGACY_DIR="/opt/sysmon"
+SERVICE_NAME="pulsar.service"
 GITHUB_REPO="https://github.com/dspeziale/agent01"
 TARBALL_URL="https://github.com/dspeziale/agent01/archive/refs/heads/main.tar.gz"
 
@@ -66,15 +67,15 @@ while [[ $# -gt 0 ]]; do
             shift
             ;;
         -h|--help)
-            echo -e "${CYAN}Sysmon Agent - Installatore Completo per Linux${NC}"
+            echo -e "${CYAN}Pulsar Agent - Installatore Completo per Linux${NC}"
             echo -e "Uso: sudo ./install-linux.sh [OPZIONI]\n"
             echo "Opzioni:"
             echo "  -u, --url <URL>        URL endpoint del server (default: https://simei.dsc-italy.app/api/v1/metrics)"
             echo "  -t, --token <TOKEN>    Token API di autenticazione (opzionale)"
             echo "  -i, --interval <SEC>   Intervallo di campionamento in secondi (default: 15)"
-            echo "  -d, --dir <PATH>       Cartella di installazione (default: /opt/sysmon)"
+            echo "  -d, --dir <PATH>       Cartella di installazione (default: /opt/pulsar)"
             echo "      --status           Mostra lo stato attuale del servizio e gli ultimi log"
-            echo "      --uninstall        Rimuove completamente il servizio e i file di Sysmon"
+            echo "      --uninstall        Rimuove completamente il servizio e i file di Pulsar"
             echo "  -h, --help             Mostra questo messaggio di aiuto"
             exit 0
             ;;
@@ -96,17 +97,24 @@ fi
 # 1. CONTROLLO STATO (--status)
 # ------------------------------------------------------------------------------
 if [ "$CHECK_STATUS" = true ]; then
-    echo -e "\n${CYAN}=== STATO DEL SERVIZIO SYSMON ===${NC}"
+    echo -e "\n${CYAN}=== STATO DEL SERVIZIO PULSAR ===${NC}"
     if command -v systemctl &>/dev/null && [ -f "/etc/systemd/system/$SERVICE_NAME" ]; then
         systemctl status "$SERVICE_NAME" --no-pager || true
         echo -e "\n${CYAN}--- Ultimi log di sistema (journalctl) ---${NC}"
         journalctl -u "$SERVICE_NAME" -n 20 --no-pager || true
+    elif command -v systemctl &>/dev/null && [ -f "/etc/systemd/system/sysmon.service" ]; then
+        systemctl status "sysmon.service" --no-pager || true
+        echo -e "\n${CYAN}--- Ultimi log di sistema (journalctl sysmon) ---${NC}"
+        journalctl -u "sysmon.service" -n 20 --no-pager || true
     else
         echo -e "${YELLOW}Servizio systemd non trovato.${NC}"
-        if [ -d "$INSTALL_DIR" ] && [ -f "$INSTALL_DIR/sysmon.log" ]; then
-            echo -e "\n${CYAN}--- Ultimi log dal file $INSTALL_DIR/sysmon.log ---${NC}"
-            tail -n 20 "$INSTALL_DIR/sysmon.log"
-        fi
+        for lp in "$INSTALL_DIR/pulsar.log" "$INSTALL_DIR/sysmon.log" "$LEGACY_DIR/sysmon.log"; do
+            if [ -f "$lp" ]; then
+                echo -e "\n${CYAN}--- Ultimi log dal file $lp ---${NC}"
+                tail -n 20 "$lp"
+                break
+            fi
+        done
     fi
     exit 0
 fi
@@ -116,11 +124,11 @@ fi
 # ------------------------------------------------------------------------------
 if [ "$UNINSTALL" = true ]; then
     echo -e "\n${YELLOW}==========================================================${NC}"
-    echo -e "${YELLOW}           DISINSTALLAZIONE AGENTE SYSMON                 ${NC}"
+    echo -e "${YELLOW}           DISINSTALLAZIONE AGENTE PULSAR                 ${NC}"
     echo -e "${YELLOW}==========================================================${NC}"
     
     if command -v systemctl &>/dev/null; then
-        for s in "$SERVICE_NAME" "sysmon" "sysmon.service"; do
+        for s in "$SERVICE_NAME" "pulsar" "pulsar.service" "sysmon" "sysmon.service"; do
             if systemctl is-active --quiet "$s" 2>/dev/null || systemctl is-enabled --quiet "$s" 2>/dev/null || [ -f "/etc/systemd/system/$s" ]; then
                 echo -e "${CYAN}  -> Rimozione servizio systemd: $s...${NC}"
                 systemctl stop "$s" 2>/dev/null || true
@@ -135,15 +143,19 @@ if [ "$UNINSTALL" = true ]; then
 
     # Uccisione forzata di eventuali processi rimasti
     pkill -9 -f "$INSTALL_DIR/main.py" 2>/dev/null || true
+    pkill -9 -f "$LEGACY_DIR/main.py" 2>/dev/null || true
+    pkill -9 -f "pulsar.*main.py" 2>/dev/null || true
     pkill -9 -f "sysmon.*main.py" 2>/dev/null || true
-    pkill -9 -f "$INSTALL_DIR/debug_probe.py" 2>/dev/null || true
+    pkill -9 -f "debug_probe.py" 2>/dev/null || true
 
-    if [ -d "$INSTALL_DIR" ]; then
-        echo -e "${CYAN}  -> Eliminazione cartella $INSTALL_DIR...${NC}"
-        rm -rf "$INSTALL_DIR"
-    fi
+    for d in "$INSTALL_DIR" "$LEGACY_DIR"; do
+        if [ -d "$d" ]; then
+            echo -e "${CYAN}  -> Eliminazione cartella $d...${NC}"
+            rm -rf "$d"
+        fi
+    done
 
-    echo -e "${GREEN}[OK] Agente Sysmon rimosso completamente dal sistema!${NC}\n"
+    echo -e "${GREEN}[OK] Agente Pulsar rimosso completamente dal sistema!${NC}\n"
     exit 0
 fi
 
@@ -152,7 +164,7 @@ fi
 # ------------------------------------------------------------------------------
 clear 2>/dev/null || true
 echo -e "${CYAN}==========================================================${NC}"
-echo -e "${CYAN}       SYSMON AGENT - INSTALLATORE AUTOMATICO LINUX       ${NC}"
+echo -e "${CYAN}       PULSAR AGENT - INSTALLATORE AUTOMATICO LINUX       ${NC}"
 echo -e "${CYAN}==========================================================${NC}\n"
 
 if [ "$INTERACTIVE" = true ]; then
@@ -174,9 +186,9 @@ fi
 echo -e "${YELLOW}[1/6] Verifica e rimozione completa di versioni precedenti...${NC}"
 HAD_PREVIOUS=false
 
-# A. Arresto e rimozione di qualsiasi servizio systemd Sysmon
+# A. Arresto e rimozione di qualsiasi servizio systemd
 if command -v systemctl &>/dev/null; then
-    for s in "$SERVICE_NAME" "sysmon" "sysmon.service"; do
+    for s in "$SERVICE_NAME" "pulsar" "pulsar.service" "sysmon" "sysmon.service"; do
         if systemctl is-active --quiet "$s" 2>/dev/null || systemctl is-enabled --quiet "$s" 2>/dev/null || [ -f "/etc/systemd/system/$s" ]; then
             HAD_PREVIOUS=true
             echo -e "  -> Rimozione servizio systemd precedente: $s..."
@@ -192,28 +204,32 @@ if command -v systemctl &>/dev/null; then
     fi
 fi
 
-# B. Terminazione forzata di eventuali processi Sysmon residenti
-OLD_PIDS=$(pgrep -f "sysmon.*main.py|$INSTALL_DIR/main.py|debug_probe.py" 2>/dev/null || true)
+# B. Terminazione forzata di eventuali processi residenti
+OLD_PIDS=$(pgrep -f "pulsar.*main.py|sysmon.*main.py|$INSTALL_DIR/main.py|$LEGACY_DIR/main.py|debug_probe.py" 2>/dev/null || true)
 if [ -n "$OLD_PIDS" ]; then
     HAD_PREVIOUS=true
-    echo -e "  -> Arresto forzato processi Sysmon attivi..."
+    echo -e "  -> Arresto forzato processi attivi..."
+    pkill -9 -f "pulsar.*main.py" 2>/dev/null || true
     pkill -9 -f "sysmon.*main.py" 2>/dev/null || true
     pkill -9 -f "$INSTALL_DIR/main.py" 2>/dev/null || true
-    pkill -9 -f "$INSTALL_DIR/debug_probe.py" 2>/dev/null || true
+    pkill -9 -f "$LEGACY_DIR/main.py" 2>/dev/null || true
+    pkill -9 -f "debug_probe.py" 2>/dev/null || true
     sleep 1
 fi
 
-# C. Pulizia completa file e moduli obsoleti nella cartella di installazione
-if [ -d "$INSTALL_DIR" ]; then
-    if [ -d "$INSTALL_DIR/sysmon" ] || [ -f "$INSTALL_DIR/main.py" ] || [ -f "$INSTALL_DIR/config.json" ]; then
-        HAD_PREVIOUS=true
-        echo -e "  -> Pulizia file e moduli della versione precedente in $INSTALL_DIR..."
-        rm -rf "$INSTALL_DIR/sysmon"
-        rm -f "$INSTALL_DIR/main.py" "$INSTALL_DIR/debug_probe.py" "$INSTALL_DIR/requirements-agent.txt"
-        rm -f "$INSTALL_DIR/sysmon_buffer.db"
-        find "$INSTALL_DIR" -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
+# C. Pulizia completa file e moduli obsoleti
+for d in "$INSTALL_DIR" "$LEGACY_DIR"; do
+    if [ -d "$d" ]; then
+        if [ -d "$d/pulsar" ] || [ -d "$d/sysmon" ] || [ -f "$d/main.py" ] || [ -f "$d/config.json" ]; then
+            HAD_PREVIOUS=true
+            echo -e "  -> Pulizia file e moduli della versione precedente in $d..."
+            rm -rf "$d/pulsar" "$d/sysmon"
+            rm -f "$d/main.py" "$d/debug_probe.py" "$d/requirements-agent.txt"
+            rm -f "$d/pulsar_buffer.db" "$d/sysmon_buffer.db"
+            find "$d" -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
+        fi
     fi
-fi
+done
 
 if [ "$HAD_PREVIOUS" = true ]; then
     echo -e "  -> ${GREEN}Disinstallazione e pulizia completata con successo.${NC}"
@@ -272,49 +288,44 @@ fi
 
 SOURCE_FOUND=false
 
-# Controlla se i sorgenti sono presenti in locale
-if [ -n "$SCRIPT_DIR" ] && [ -d "$SCRIPT_DIR/sysmon" ] && [ -f "$SCRIPT_DIR/main.py" ]; then
-    echo -e "  -> Sorgenti trovati nella directory corrente: $SCRIPT_DIR"
-    cp -r "$SCRIPT_DIR/sysmon" "$INSTALL_DIR/"
-    cp "$SCRIPT_DIR/main.py" "$INSTALL_DIR/"
-    [ -f "$SCRIPT_DIR/requirements-agent.txt" ] && cp "$SCRIPT_DIR/requirements-agent.txt" "$INSTALL_DIR/"
-    SOURCE_FOUND=true
-elif [ -n "$SCRIPT_DIR" ] && [ -d "$SCRIPT_DIR/../sysmon" ] && [ -f "$SCRIPT_DIR/../main.py" ]; then
-    PARENT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-    echo -e "  -> Sorgenti trovati nella cartella superiore: $PARENT_DIR"
-    cp -r "$PARENT_DIR/sysmon" "$INSTALL_DIR/"
-    cp "$PARENT_DIR/main.py" "$INSTALL_DIR/"
-    [ -f "$PARENT_DIR/requirements-agent.txt" ] && cp "$PARENT_DIR/requirements-agent.txt" "$INSTALL_DIR/"
-    SOURCE_FOUND=true
-elif [ -d "./sysmon" ] && [ -f "./main.py" ]; then
-    echo -e "  -> Sorgenti trovati nel percorso corrente."
-    cp -r "./sysmon" "$INSTALL_DIR/"
-    cp "./main.py" "$INSTALL_DIR/"
-    [ -f "./requirements-agent.txt" ] && cp "./requirements-agent.txt" "$INSTALL_DIR/"
-    SOURCE_FOUND=true
-fi
+# Cerca directory sorgenti
+for cand in "$SCRIPT_DIR" "$SCRIPT_DIR/.." "."; do
+    if [ -d "$cand/pulsar" ] || [ -d "$cand/sysmon" ]; then
+        if [ -f "$cand/main.py" ]; then
+            [ -d "$cand/pulsar" ] && cp -r "$cand/pulsar" "$INSTALL_DIR/"
+            [ -d "$cand/sysmon" ] && cp -r "$cand/sysmon" "$INSTALL_DIR/"
+            cp "$cand/main.py" "$INSTALL_DIR/"
+            [ -f "$cand/requirements-agent.txt" ] && cp "$cand/requirements-agent.txt" "$INSTALL_DIR/"
+            [ -f "$cand/debug_probe.py" ] && cp "$cand/debug_probe.py" "$INSTALL_DIR/"
+            SOURCE_FOUND=true
+            echo -e "  -> Sorgenti trovati e copiati da: $cand"
+            break
+        fi
+    fi
+done
 
-# Se non trovati in locale (es. script lanciato via curl/wget su server remoto), scarica da GitHub
 if [ "$SOURCE_FOUND" = false ]; then
     echo -e "  -> Scaricamento sorgenti completi da GitHub (${CYAN}$TARBALL_URL${NC})..."
-    TMP_DL_DIR=$(mktemp -d /tmp/sysmon-install-XXXXXX)
+    TMP_DL_DIR=$(mktemp -d /tmp/pulsar-install-XXXXXX)
     
     if command -v curl &>/dev/null; then
-        curl -fsSL "$TARBALL_URL" -o "$TMP_DL_DIR/sysmon.tar.gz"
+        curl -fsSL "$TARBALL_URL" -o "$TMP_DL_DIR/pulsar.tar.gz"
     elif command -v wget &>/dev/null; then
-        wget -qO "$TMP_DL_DIR/sysmon.tar.gz" "$TARBALL_URL"
+        wget -qO "$TMP_DL_DIR/pulsar.tar.gz" "$TARBALL_URL"
     else
         echo -e "${RED}[ERRORE] Necessario curl o wget per scaricare i sorgenti dell'agente.${NC}"
         exit 1
     fi
     
-    tar -xzf "$TMP_DL_DIR/sysmon.tar.gz" -C "$TMP_DL_DIR"
+    tar -xzf "$TMP_DL_DIR/pulsar.tar.gz" -C "$TMP_DL_DIR"
     EXTRACTED_DIR=$(find "$TMP_DL_DIR" -mindepth 1 -maxdepth 1 -type d | head -n 1)
     
-    if [ -d "$EXTRACTED_DIR/sysmon" ]; then
-        cp -r "$EXTRACTED_DIR/sysmon" "$INSTALL_DIR/"
+    if [ -d "$EXTRACTED_DIR/pulsar" ] || [ -d "$EXTRACTED_DIR/sysmon" ]; then
+        [ -d "$EXTRACTED_DIR/pulsar" ] && cp -r "$EXTRACTED_DIR/pulsar" "$INSTALL_DIR/"
+        [ -d "$EXTRACTED_DIR/sysmon" ] && cp -r "$EXTRACTED_DIR/sysmon" "$INSTALL_DIR/"
         cp "$EXTRACTED_DIR/main.py" "$INSTALL_DIR/"
         [ -f "$EXTRACTED_DIR/requirements-agent.txt" ] && cp "$EXTRACTED_DIR/requirements-agent.txt" "$INSTALL_DIR/"
+        [ -f "$EXTRACTED_DIR/debug_probe.py" ] && cp "$EXTRACTED_DIR/debug_probe.py" "$INSTALL_DIR/"
         echo -e "  -> ${GREEN}Sorgenti scaricati ed estratti in $INSTALL_DIR con successo.${NC}"
     else
         echo -e "${RED}[ERRORE] Formato archivio sorgenti non valido.${NC}"
@@ -338,7 +349,7 @@ if [ ! -f "$VENV_DIR/bin/python" ]; then
     }
 fi
 
-echo -e "  -> Installazione librerie minime (psutil, requests)..."
+echo -e "  -> Installazione librerie essenziali (psutil, requests)..."
 "$VENV_DIR/bin/pip" install --upgrade --no-warn-script-location pip >/dev/null 2>&1 || true
 
 if [ -f "$INSTALL_DIR/requirements-agent.txt" ]; then
@@ -367,14 +378,14 @@ cat <<EOF > "$CONFIG_FILE"
   "interval_seconds": $INTERVAL,
   "verify_ssl": true,
   "offline_buffer_enabled": true,
-  "offline_buffer_db_path": "$INSTALL_DIR/sysmon_buffer.db",
+  "offline_buffer_db_path": "$INSTALL_DIR/pulsar_buffer.db",
   "include_processes": true,
   "top_processes_count": 10,
   "include_disk_io": true,
   "include_net_io": true,
   "include_network_interfaces": true,
   "log_level": "INFO",
-  "log_file": "$INSTALL_DIR/sysmon.log"
+  "log_file": "$INSTALL_DIR/pulsar.log"
 }
 EOF
 
@@ -394,7 +405,7 @@ else
     echo "$TEST_OUTPUT" | sed 's/^/     /'
 fi
 
-# Copia questo installer in /opt/sysmon per consentire comode disinstallazioni o cambi config
+# Copia questo installer in /opt/pulsar
 cp "$0" "$INSTALL_DIR/install-linux.sh" 2>/dev/null || true
 chmod +x "$INSTALL_DIR/install-linux.sh" 2>/dev/null || true
 
@@ -407,7 +418,7 @@ if command -v systemctl &>/dev/null; then
     SERVICE_FILE="/etc/systemd/system/$SERVICE_NAME"
     cat <<EOF > "$SERVICE_FILE"
 [Unit]
-Description=Sysmon - Agente Telemetria di Sistema
+Description=Pulsar - Agente Telemetria di Sistema
 Documentation=https://simei.dsc-italy.app/
 After=network-online.target
 Wants=network-online.target
@@ -440,15 +451,15 @@ EOF
 else
     echo -e "${YELLOW}Systemd non rilevato sul sistema (ambiente container o OpenRC).${NC}"
     echo -e "Avvio dell'agente in background tramite nohup..."
-    nohup "$VENV_DIR/bin/python" "$INSTALL_DIR/main.py" --config "$CONFIG_FILE" > "$INSTALL_DIR/sysmon.stdout.log" 2>&1 &
+    nohup "$VENV_DIR/bin/python" "$INSTALL_DIR/main.py" --config "$CONFIG_FILE" > "$INSTALL_DIR/pulsar.stdout.log" 2>&1 &
     echo -e "  -> ${GREEN}Agente avviato con PID: $!${NC}"
 fi
 
 echo -e "\n${GREEN}==========================================================${NC}"
 echo -e "${GREEN}    INSTALLAZIONE COMPLETATA CON SUCCESSO SU LINUX!       ${NC}"
 echo -e "${GREEN}==========================================================${NC}"
-echo -e "L'agente telemetria e' ora operativo e partira' automaticamente al riavvio."
-echo -e "  • Verifica stato:      ${CYAN}sudo systemctl status sysmon${NC}"
-echo -e "  • Log in tempo reale:  ${CYAN}sudo journalctl -u sysmon -f${NC}"
+echo -e "L'agente Pulsar e' ora operativo e partira' automaticamente al riavvio."
+echo -e "  • Verifica stato:      ${CYAN}sudo systemctl status pulsar${NC}"
+echo -e "  • Log in tempo reale:  ${CYAN}sudo journalctl -u pulsar -f${NC}"
 echo -e "  • Dashboard Web:       ${CYAN}https://simei.dsc-italy.app/${NC}"
-echo -e "  • Disinstallazione:    ${YELLOW}sudo /opt/sysmon/install-linux.sh --uninstall${NC}\n"
+echo -e "  • Disinstallazione:    ${YELLOW}sudo /opt/pulsar/install-linux.sh --uninstall${NC}\n"

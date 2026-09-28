@@ -1,4 +1,4 @@
-# Dockerfile principale per Sysmon Server su Coolify
+# Dockerfile principale per Pulsar Server su Coolify
 FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -15,8 +15,10 @@ COPY requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY server /app/server
+COPY pulsar /app/pulsar
 COPY sysmon /app/sysmon
 COPY main.py /app/main.py
+COPY debug_probe.py /app/debug_probe.py
 COPY requirements-agent.txt /app/requirements-agent.txt
 
 RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
