@@ -300,19 +300,33 @@ if (Get-Command Register-ScheduledTask -ErrorAction SilentlyContinue) {
         Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue | Out-Null
         
         $action = New-ScheduledTaskAction -Execute $VenvPythonW -Argument "`"$MainPy`" --config `"$ConfigFile`"" -WorkingDirectory $InstallDir
-        $trigger = New-ScheduledTaskTrigger -AtStartup
-        $principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
-        $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Days 0)
-        $taskObj = New-ScheduledTask -Action $action -Trigger $trigger -Principal $principal -Settings $settings
         
+        # Trigger multipli per garantire che la sonda sia sempre attiva:
+        $triggerStartup = New-ScheduledTaskTrigger -AtStartup
+        $triggerLogon = New-ScheduledTaskTrigger -AtLogOn
+        $triggerWatchdog = New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes 5) -RepetitionDuration (New-TimeSpan -Days 9999)
+        $triggers = @($triggerStartup, $triggerLogon, $triggerWatchdog)
+
+        $principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
+        
+        $settings = New-ScheduledTaskSettingsSet `
+            -AllowStartIfOnBatteries `
+            -DontStopIfGoingOnBatteries `
+            -DontStopOnIdleEnd `
+            -StartWhenAvailable `
+            -RestartCount 999 `
+            -RestartInterval (New-TimeSpan -Minutes 1) `
+            -ExecutionTimeLimit ([TimeSpan]::Zero) `
+            -MultipleInstances IgnoreNew `
+            -Priority 4
+            
+        $taskObj = New-ScheduledTask -Action $action -Trigger $triggers -Principal $principal -Settings $settings
         Register-ScheduledTask -TaskName $TaskName -InputObject $taskObj -Force -ErrorAction Stop | Out-Null
         $registered = $true
     } catch {
         try {
-            # Fallback se SYSTEM non e' consentito dalla policy locale: trigger al logon dell'utente
-            $triggerLogon = New-ScheduledTaskTrigger -AtLogOn
             $principalLogon = New-ScheduledTaskPrincipal -GroupId "BUILTIN\Administrators" -RunLevel Highest
-            $taskObj = New-ScheduledTask -Action $action -Trigger $triggerLogon -Principal $principalLogon -Settings $settings
+            $taskObj = New-ScheduledTask -Action $action -Trigger $triggers -Principal $principalLogon -Settings $settings
             Register-ScheduledTask -TaskName $TaskName -InputObject $taskObj -Force -ErrorAction Stop | Out-Null
             $registered = $true
         } catch {
@@ -333,9 +347,7 @@ if (-not $registered) {
         $shortCfg = if (Test-Path $ConfigFile) { $fso.GetFile($ConfigFile).ShortPath } else { $ConfigFile }
         
         & schtasks.exe /Create /TN $TaskName /TR "`"$shortPy`" `"$shortMain`" --config `"$shortCfg`"" /SC ONSTART /RU "SYSTEM" /RL HIGHEST /F 2>$null
-        if ($LASTEXITCODE -ne 0) {
-            & schtasks.exe /Create /TN $TaskName /TR "`"$shortPy`" `"$shortMain`" --config `"$shortCfg`"" /SC ONLOGON /RL HIGHEST /F 2>$null
-        }
+        & schtasks.exe /Create /TN "${TaskName}_Watchdog" /TR "`"$shortPy`" `"$shortMain`" --config `"$shortCfg`"" /SC MINUTE /MO 5 /RU "SYSTEM" /RL HIGHEST /F 2>$null
     } catch {}
 }
 

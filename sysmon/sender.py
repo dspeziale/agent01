@@ -112,6 +112,7 @@ class MetricSender:
 
         successful_ids = []
         for row_id, record in batch:
+            resp = None
             try:
                 resp = self._post_payload(record)
                 if 200 <= resp.status_code < 300:
@@ -125,6 +126,12 @@ class MetricSender:
             except Exception as e:
                 logger.warning(f"Errore di rete durante lo svuotamento del buffer: {e}")
                 break
+            finally:
+                if resp is not None:
+                    try:
+                        resp.close()
+                    except Exception:
+                        pass
 
         if successful_ids:
             self.buffer.delete_batch(successful_ids)
@@ -141,6 +148,7 @@ class MetricSender:
         if self.buffer and self.buffer.count() > 0:
             self.flush_buffer()
 
+        response = None
         try:
             response = self._post_payload(payload)
 
@@ -166,6 +174,12 @@ class MetricSender:
             logger.error(f"Errore imprevisto durante l'invio metriche: {e}", exc_info=True)
             self._buffer_fallback(payload)
             return False
+        finally:
+            if response is not None:
+                try:
+                    response.close()
+                except Exception:
+                    pass
 
     def _buffer_fallback(self, payload: Dict[str, Any]) -> None:
         """Salva il record nel buffer locale se abilitato."""

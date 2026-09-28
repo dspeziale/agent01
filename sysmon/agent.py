@@ -52,13 +52,24 @@ class MonitoringAgent:
                 fmt="[%(asctime)s] [%(levelname)s] [%(name)s] %(message)s",
                 datefmt="%Y-%m-%d %H:%M:%S",
             )
-            console_handler = logging.StreamHandler(sys.stdout)
-            console_handler.setFormatter(formatter)
-            root_logger.addHandler(console_handler)
+            # Aggiunge lo stream handler alla console SOLO se sys.stdout è un descrittore valido
+            if sys.stdout is not None:
+                try:
+                    console_handler = logging.StreamHandler(sys.stdout)
+                    console_handler.setFormatter(formatter)
+                    root_logger.addHandler(console_handler)
+                except Exception:
+                    pass
 
             if self.config.log_file:
                 try:
-                    file_handler = logging.FileHandler(self.config.log_file, encoding="utf-8")
+                    from logging.handlers import RotatingFileHandler
+                    file_handler = RotatingFileHandler(
+                        self.config.log_file,
+                        maxBytes=10 * 1024 * 1024,  # 10 MB
+                        backupCount=3,
+                        encoding="utf-8",
+                    )
                     file_handler.setFormatter(formatter)
                     root_logger.addHandler(file_handler)
                 except Exception as e:
@@ -78,11 +89,24 @@ class MonitoringAgent:
     def _signal_handler(self, signum, frame):
         """Intercetta Ctrl+C o segnali di stop per terminare senza corrompere i dati."""
         sig_name = signal.Signals(signum).name if hasattr(signal, "Signals") else str(signum)
+        
+        # Su Windows in background (es. Task Scheduler o chiusura della console di installazione),
+        # un SIGINT/CTRL_CLOSE non deve terminare l'agente
+        if os.name == "nt" and signum == getattr(signal, "SIGINT", 2):
+            is_interactive = False
+            try:
+                is_interactive = sys.stdin and hasattr(sys.stdin, "isatty") and sys.stdin.isatty()
+            except Exception:
+                pass
+            if not is_interactive:
+                logger.info("Ignorato segnale SIGINT in background per garantire la continuita' del monitoraggio.")
+                return
+
         logger.info(f"Ricevuto segnale di terminazione ({sig_name}). Arresto ordinato dell'agente...")
         self._is_running = False
 
     def start(self) -> None:
-        """Avvia il loop periodico di monitoraggio."""
+        """Avvia il loop periodico di monitoraggio con watchdog interno anticrash."""
         self._is_running = True
 
         # Registrazione gestione segnali di arresto
@@ -90,24 +114,34 @@ class MonitoringAgent:
             signal.signal(signal.SIGINT, self._signal_handler)
             signal.signal(signal.SIGTERM, self._signal_handler)
         except (ValueError, AttributeError):
-            # In alcuni thread non principali o ambienti specifici la registrazione può non essere permessa
             pass
 
         logger.info(
             f"Sysmon Agent avviato. Frequenza di campionamento: ogni {self.config.interval_seconds}s. Server: {self.config.server_url}"
         )
 
+        consecutive_errors = 0
         while self._is_running:
             start_time = time.time()
 
             try:
                 snapshot = self.collector.collect()
-                self.sender.send(snapshot)
+                sent = self.sender.send(snapshot)
+                if sent:
+                    consecutive_errors = 0
+                else:
+                    consecutive_errors += 1
             except Exception as e:
+                consecutive_errors += 1
                 logger.error(f"Errore non gestito nel ciclo di monitoraggio: {e}", exc_info=True)
 
+            # In caso di errori ripetuti consecutivi, applica un lieve backoff per non saturare la CPU
+            backoff_delay = 0.0
+            if consecutive_errors > 5:
+                backoff_delay = min(30.0, consecutive_errors * 2.0)
+
             elapsed = time.time() - start_time
-            sleep_duration = max(0.1, self.config.interval_seconds - elapsed)
+            sleep_duration = max(0.5, (self.config.interval_seconds + backoff_delay) - elapsed)
 
             # Esegui la sleep a piccoli step per reagire prontamente a Ctrl+C
             step_sleep = 0.5
