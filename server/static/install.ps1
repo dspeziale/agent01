@@ -172,18 +172,55 @@ $MainPy = Join-Path $InstallDir "main.py"
 $VbsContent = "CreateObject(`"Wscript.Shell`").Run `"`"`"$VenvPython`"`" `"`"$MainPy`"`" --config `"`"$ConfigFile`"`"`, 0, False"
 [System.IO.File]::WriteAllText($LauncherVbs, $VbsContent, [System.Text.Encoding]::ASCII)
 
-cmd.exe /c "schtasks.exe /End /TN $TaskName 2>nul" | Out-Null
-cmd.exe /c "schtasks.exe /Delete /TN $TaskName /F 2>nul" | Out-Null
-
-$TaskCommand = "wscript.exe `"$LauncherVbs`""
-cmd.exe /c "schtasks.exe /Create /TN $TaskName /TR `"$TaskCommand`" /SC ONSTART /RU SYSTEM /RL HIGHEST /F 2>nul" | Out-Null
-
-if ($LASTEXITCODE -ne 0) {
-    # Fallback su ONLOGON se la policy locale blocca SYSTEM
-    cmd.exe /c "schtasks.exe /Create /TN $TaskName /TR `"$TaskCommand`" /SC ONLOGON /RL HIGHEST /F" | Out-Null
+$registered = $false
+if (Get-Command Register-ScheduledTask -ErrorAction SilentlyContinue) {
+    try {
+        Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue | Out-Null
+        
+        $action = New-ScheduledTaskAction -Execute "wscript.exe" -Argument "`"$LauncherVbs`""
+        $trigger = New-ScheduledTaskTrigger -AtStartup
+        $principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
+        $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Days 0)
+        $taskObj = New-ScheduledTask -Action $action -Trigger $trigger -Principal $principal -Settings $settings
+        
+        Register-ScheduledTask -TaskName $TaskName -InputObject $taskObj -Force -ErrorAction Stop | Out-Null
+        $registered = $true
+    } catch {
+        try {
+            # Fallback se SYSTEM non e' consentito: esegui ad accesso utente come Administrator
+            $triggerLogon = New-ScheduledTaskTrigger -AtLogOn
+            $principalLogon = New-ScheduledTaskPrincipal -GroupId "BUILTIN\Administrators" -RunLevel Highest
+            $taskObj = New-ScheduledTask -Action $action -Trigger $triggerLogon -Principal $principalLogon -Settings $settings
+            Register-ScheduledTask -TaskName $TaskName -InputObject $taskObj -Force -ErrorAction Stop | Out-Null
+            $registered = $true
+        } catch {
+            Write-Host "  -> Registrazione cmdlet fallita, uso fallback schtasks..." -ForegroundColor Yellow
+        }
+    }
 }
 
-cmd.exe /c "schtasks.exe /Run /TN $TaskName 2>nul" | Out-Null
+# Fallback schtasks.exe con ShortPath (notazione 8.3 priva di spazi)
+if (-not $registered) {
+    try {
+        cmd.exe /c "schtasks.exe /End /TN $TaskName 2>nul" | Out-Null
+        cmd.exe /c "schtasks.exe /Delete /TN $TaskName /F 2>nul" | Out-Null
+        
+        $fso = New-Object -ComObject Scripting.FileSystemObject
+        $shortPath = if (Test-Path $LauncherVbs) { $fso.GetFile($LauncherVbs).ShortPath } else { $LauncherVbs }
+        
+        & schtasks.exe /Create /TN $TaskName /TR "wscript.exe $shortPath" /SC ONSTART /RU "SYSTEM" /RL HIGHEST /F 2>$null
+        if ($LASTEXITCODE -ne 0) {
+            & schtasks.exe /Create /TN $TaskName /TR "wscript.exe $shortPath" /SC ONLOGON /RL HIGHEST /F 2>$null
+        }
+    } catch {}
+}
+
+# Avvio immediato dell'attività
+if (Get-Command Start-ScheduledTask -ErrorAction SilentlyContinue) {
+    Start-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue | Out-Null
+} else {
+    cmd.exe /c "schtasks.exe /Run /TN $TaskName 2>nul" | Out-Null
+}
 Start-Sleep -Seconds 2
 
 Write-Host "`n==========================================================" -ForegroundColor Green
