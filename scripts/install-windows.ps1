@@ -264,8 +264,17 @@ Write-Host "  -> Server di destinazione: $ServerUrl" -ForegroundColor Cyan
 Write-Host "  -> Intervallo campionamento: ogni ${Interval}s" -ForegroundColor Cyan
 Write-Host "  -> File configurazione generato: $ConfigFile" -ForegroundColor Gray
 
-# 5. Registrazione Servizio / Attività Pianificata (Avvio automatico al boot)
-Write-Host "`n[5/5] Registrazione Attivita' Pianificata Windows ($TaskName)..." -ForegroundColor Yellow
+# 5. Test di invio iniziale (--once)
+Write-Host "`n[5/6] Test di connessione e primo invio telemetria (--once)..." -ForegroundColor Yellow
+try {
+    $testResult = & "$VenvDir\Scripts\python.exe" "$InstallDir\main.py" --config "$ConfigFile" --once 2>&1
+    Write-Host "  -> Primo pacchetto telemetrico inviato con successo al server!" -ForegroundColor Green
+} catch {
+    Write-Host "  -> [AVVISO] Errore durante l'invio iniziale: $_" -ForegroundColor Yellow
+}
+
+# 6. Registrazione Servizio / Attività Pianificata (Avvio automatico al boot)
+Write-Host "`n[6/6] Registrazione Attivita' Pianificata Windows ($TaskName)..." -ForegroundColor Yellow
 
 $VenvPythonW = Join-Path $VenvDir "Scripts\pythonw.exe"
 if (-not (Test-Path $VenvPythonW)) { $VenvPythonW = $VenvPython }

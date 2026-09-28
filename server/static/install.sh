@@ -166,8 +166,16 @@ chmod 600 "${INSTALL_DIR}/config.json"
 echo "  -> Destinazione metriche: ${METRICS_URL}"
 echo "  -> Frequenza invio: ogni ${INTERVAL}s"
 
-# 5. Registrazione e avvio servizio Systemd
-echo "[5/5] Registrazione e avvio servizio di sistema..."
+# 5. Test di invio iniziale (--once)
+echo "[5/6] Test di connessione e primo campionamento telemetria (--once)..."
+if "${VENV_DIR}/bin/python" "${INSTALL_DIR}/main.py" --config "${INSTALL_DIR}/config.json" --once >/dev/null 2>&1; then
+    echo "  -> Primo pacchetto telemetrico inviato con successo al server!"
+else
+    echo "  -> [AVVISO] Verifica fallita, consultare il log in ${INSTALL_DIR}/sysmon.log"
+fi
+
+# 6. Registrazione e avvio servizio Systemd
+echo "[6/6] Registrazione e avvio servizio di sistema..."
 if [ -x "$(command -v systemctl)" ]; then
     SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}"
     cat <<EOF > "${SERVICE_FILE}"

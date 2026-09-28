@@ -12,6 +12,10 @@ import subprocess
 
 # Rilevamento automatico e transizione trasparente a .venv se non già attivo
 def _ensure_virtualenv():
+    # Se siamo già all'interno di un virtualenv (incluso pythonw.exe), non re-invocare
+    if sys.prefix != sys.base_prefix:
+        return
+
     project_dir = os.path.dirname(os.path.abspath(__file__))
     venv_win = os.path.join(project_dir, ".venv", "Scripts", "python.exe")
     venv_nix = os.path.join(project_dir, ".venv", "bin", "python")

@@ -163,8 +163,17 @@ $configJson = $configObj | ConvertTo-Json -Depth 4
 Write-Host "  -> Endpoint metriche: $MetricsUrl" -ForegroundColor Cyan
 Write-Host "  -> Frequenza invio: ogni ${Interval}s" -ForegroundColor Cyan
 
+# 5. Test di invio iniziale (--once)
+Write-Host "`n[5/6] Test di connessione e primo invio telemetria (--once)..." -ForegroundColor Yellow
+try {
+    $testResult = & "$VenvDir\Scripts\python.exe" "$InstallDir\main.py" --config "$ConfigFile" --once 2>&1
+    Write-Host "  -> Primo pacchetto telemetrico inviato con successo al server!" -ForegroundColor Green
+} catch {
+    Write-Host "  -> [AVVISO] Errore durante l'invio iniziale: $_" -ForegroundColor Yellow
+}
+
 # 6. Registrazione Attività Pianificata (Avvio automatico invisibile)
-Write-Host "`n[5/5] Registrazione Attivita' Pianificata ($TaskName)..." -ForegroundColor Yellow
+Write-Host "`n[6/6] Registrazione Attivita' Pianificata ($TaskName)..." -ForegroundColor Yellow
 $VenvPythonW = Join-Path $VenvDir "Scripts\pythonw.exe"
 if (-not (Test-Path $VenvPythonW)) { $VenvPythonW = $VenvPython }
 $MainPy = Join-Path $InstallDir "main.py"
