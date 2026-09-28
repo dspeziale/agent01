@@ -1,0 +1,25 @@
+{
+  "server_url": "https://localhost:8443/api/v1/metrics",
+  "api_key": "tuo_token_segreto_qui",
+  "auth_type": "Bearer",
+  "auth_header_name": "Authorization",
+  "interval_seconds": 10.0,
+  "timeout_seconds": 10.0,
+  "verify_ssl": true,
+  "max_retries": 3,
+  "offline_buffer_enabled": true,
+  "offline_buffer_db_path": "sysmon_buffer.db",
+  "offline_buffer_max_records": 1000,
+  "include_processes": true,
+  "top_processes_count": 5,
+  "include_disk_io": true,
+  "include_net_io": true,
+  "include_network_interfaces": true,
+  "custom_tags": {
+    "environment": "production",
+    "datacenter": "milano-dc1",
+    "server_role": "application-server"
+  },
+  "log_level": "INFO",
+  "log_file": "sysmon.log"
+}
