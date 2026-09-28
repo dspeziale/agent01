@@ -264,13 +264,21 @@ Write-Host "  -> Server di destinazione: $ServerUrl" -ForegroundColor Cyan
 Write-Host "  -> Intervallo campionamento: ogni ${Interval}s" -ForegroundColor Cyan
 Write-Host "  -> File configurazione generato: $ConfigFile" -ForegroundColor Gray
 
+# Copia o scarica la sonda di debug
+if (Test-Path (Join-Path $tempExtract "debug_probe.py")) {
+    Copy-Item -Path (Join-Path $tempExtract "debug_probe.py") -Destination $InstallDir -Force
+}
+
 # 5. Test di invio iniziale (--once)
 Write-Host "`n[5/6] Test di connessione e primo invio telemetria (--once)..." -ForegroundColor Yellow
-try {
-    $testResult = & "$VenvDir\Scripts\python.exe" "$InstallDir\main.py" --config "$ConfigFile" --once 2>&1
+$testResult = & "$VenvDir\Scripts\python.exe" "$InstallDir\main.py" --config "$ConfigFile" --once 2>&1
+if ($LASTEXITCODE -eq 0) {
     Write-Host "  -> Primo pacchetto telemetrico inviato con successo al server!" -ForegroundColor Green
-} catch {
-    Write-Host "  -> [AVVISO] Errore durante l'invio iniziale: $_" -ForegroundColor Yellow
+} else {
+    Write-Host "  -> [AVVISO] Invio telemetria non completato (exit code: $LASTEXITCODE):" -ForegroundColor Yellow
+    if ($testResult) {
+        $testResult | ForEach-Object { Write-Host "     $_" -ForegroundColor Yellow }
+    }
 }
 
 # 6. Registrazione Servizio / Attività Pianificata (Avvio automatico al boot)

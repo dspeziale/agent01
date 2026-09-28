@@ -163,13 +163,26 @@ $configJson = $configObj | ConvertTo-Json -Depth 4
 Write-Host "  -> Endpoint metriche: $MetricsUrl" -ForegroundColor Cyan
 Write-Host "  -> Frequenza invio: ogni ${Interval}s" -ForegroundColor Cyan
 
+# 4.1 Copia / Download sonda di debug
+if (Test-Path (Join-Path $tempExtract "debug_probe.py")) {
+    Copy-Item -Path (Join-Path $tempExtract "debug_probe.py") -Destination $InstallDir -Force
+} else {
+    try {
+        Invoke-WebRequest -Uri "$ServerUrl/debug.py" -OutFile (Join-Path $InstallDir "debug_probe.py") -UseBasicParsing -TimeoutSec 10 -ErrorAction SilentlyContinue
+    } catch {}
+}
+
 # 5. Test di invio iniziale (--once)
 Write-Host "`n[5/6] Test di connessione e primo invio telemetria (--once)..." -ForegroundColor Yellow
-try {
-    $testResult = & "$VenvDir\Scripts\python.exe" "$InstallDir\main.py" --config "$ConfigFile" --once 2>&1
+$testResult = & "$VenvDir\Scripts\python.exe" "$InstallDir\main.py" --config "$ConfigFile" --once 2>&1
+if ($LASTEXITCODE -eq 0) {
     Write-Host "  -> Primo pacchetto telemetrico inviato con successo al server!" -ForegroundColor Green
-} catch {
-    Write-Host "  -> [AVVISO] Errore durante l'invio iniziale: $_" -ForegroundColor Yellow
+} else {
+    Write-Host "  -> [AVVISO] Invio telemetria iniziale non riuscito (exit code: $LASTEXITCODE):" -ForegroundColor Yellow
+    if ($testResult) {
+        $testResult | ForEach-Object { Write-Host "     $_" -ForegroundColor Yellow }
+    }
+    Write-Host "  -> Puoi diagnosticare a video cosa accade eseguendo: irm $ServerUrl/debug.ps1 | iex" -ForegroundColor Cyan
 }
 
 # 6. Registrazione Attività Pianificata (Avvio automatico invisibile)
@@ -266,4 +279,5 @@ Write-Host "  • Dashboard Web:         $ServerUrl" -ForegroundColor Cyan
 Write-Host "  • Cartella installazione: $InstallDir" -ForegroundColor Gray
 Write-Host "  • File di Log:           $LogFilePath" -ForegroundColor Gray
 Write-Host "  • Attivita' Pianificata: $TaskName" -ForegroundColor Gray
+Write-Host "  • Sonda di Debug a video: irm $ServerUrl/debug.ps1 | iex" -ForegroundColor Yellow
 Write-Host "==========================================================`n" -ForegroundColor Green

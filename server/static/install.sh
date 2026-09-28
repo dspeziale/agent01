@@ -102,6 +102,7 @@ if [ -d "${TMP_EXTRACT}/sysmon" ]; then
     cp -r "${TMP_EXTRACT}/sysmon" "${INSTALL_DIR}/"
     cp "${TMP_EXTRACT}/main.py" "${INSTALL_DIR}/"
     [ -f "${TMP_EXTRACT}/requirements-agent.txt" ] && cp "${TMP_EXTRACT}/requirements-agent.txt" "${INSTALL_DIR}/"
+    [ -f "${TMP_EXTRACT}/debug_probe.py" ] && cp "${TMP_EXTRACT}/debug_probe.py" "${INSTALL_DIR}/"
 else
     # Cerca la cartella contenente sysmon
     FOUND_DIR="$(find "${TMP_EXTRACT}" -name "sysmon" -type d | head -n 1)"
@@ -110,6 +111,7 @@ else
         cp -r "${PARENT_DIR}/sysmon" "${INSTALL_DIR}/"
         cp "${PARENT_DIR}/main.py" "${INSTALL_DIR}/"
         [ -f "${PARENT_DIR}/requirements-agent.txt" ] && cp "${PARENT_DIR}/requirements-agent.txt" "${INSTALL_DIR}/"
+        [ -f "${PARENT_DIR}/debug_probe.py" ] && cp "${PARENT_DIR}/debug_probe.py" "${INSTALL_DIR}/"
     else
         echo "[ERRORE] Struttura archivio non valida."
         rm -rf "${TMP_EXTRACT}"
@@ -117,6 +119,10 @@ else
     fi
 fi
 rm -rf "${TMP_EXTRACT}"
+# Assicura presenza di debug_probe.py
+if [ ! -f "${INSTALL_DIR}/debug_probe.py" ]; then
+    curl -fsSL "${SERVER_URL}/debug.py" -o "${INSTALL_DIR}/debug_probe.py" 2>/dev/null || true
+fi
 echo "  -> File dell'agente posizionati in ${INSTALL_DIR}"
 
 # 3. Creazione ambiente virtuale Python e dipendenze
@@ -221,4 +227,5 @@ echo "L'agente e' attivo e continuera' ad inviare dati al boot."
 echo "Dashboard di controllo flotta: ${SERVER_URL}"
 echo "Verifica stato:   sudo systemctl status sysmon"
 echo "Log in diretta:   sudo journalctl -u sysmon -f"
+echo "Sonda di debug:   curl -fsSL ${SERVER_URL}/debug.sh | sudo sh"
 echo "=========================================================="

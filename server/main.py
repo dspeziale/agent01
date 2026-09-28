@@ -120,6 +120,7 @@ def ensure_agent_bundle(format_type: str) -> Optional[str]:
     sysmon_dir = None
     main_file = None
     req_file = None
+    debug_file = None
     for root in possible_roots:
         cand_sysmon = os.path.join(root, "sysmon")
         cand_main = os.path.join(root, "main.py")
@@ -129,6 +130,9 @@ def ensure_agent_bundle(format_type: str) -> Optional[str]:
             cand_req = os.path.join(root, "requirements-agent.txt")
             if os.path.isfile(cand_req):
                 req_file = cand_req
+            cand_dbg = os.path.join(root, "debug_probe.py")
+            if os.path.isfile(cand_dbg):
+                debug_file = cand_dbg
             break
 
     if not sysmon_dir or not main_file:
@@ -142,6 +146,8 @@ def ensure_agent_bundle(format_type: str) -> Optional[str]:
                 tar.add(main_file, arcname="main.py")
                 if req_file:
                     tar.add(req_file, arcname="requirements-agent.txt")
+                if debug_file:
+                    tar.add(debug_file, arcname="debug_probe.py")
             logger.info(f"Bundle {bundle_path} generato con successo.")
             return bundle_path
         elif format_type == "zip":
@@ -156,6 +162,8 @@ def ensure_agent_bundle(format_type: str) -> Optional[str]:
                 zipf.write(main_file, "main.py")
                 if req_file:
                     zipf.write(req_file, "requirements-agent.txt")
+                if debug_file:
+                    zipf.write(debug_file, "debug_probe.py")
             logger.info(f"Bundle {bundle_path} generato con successo.")
             return bundle_path
     except Exception as e:
@@ -198,6 +206,47 @@ async def serve_install_ps1():
             headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
         )
     raise HTTPException(status_code=404, detail="Script install.ps1 non trovato")
+
+
+@app.get("/debug.py")
+async def serve_debug_py():
+    """Restituisce lo script Python standalone della sonda di diagnostica."""
+    script_path = os.path.join(static_dir, "debug_probe.py")
+    if not os.path.isfile(script_path):
+        script_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "debug_probe.py")
+    if os.path.isfile(script_path):
+        return FileResponse(
+            script_path,
+            media_type="text/x-python; charset=utf-8",
+            headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
+        )
+    raise HTTPException(status_code=404, detail="Script debug_probe.py non trovato")
+
+
+@app.get("/debug.ps1")
+async def serve_debug_ps1():
+    """Restituisce lo script PowerShell per eseguire la sonda di diagnostica su Windows."""
+    script_path = os.path.join(static_dir, "debug.ps1")
+    if os.path.isfile(script_path):
+        return FileResponse(
+            script_path,
+            media_type="text/plain; charset=utf-8",
+            headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
+        )
+    raise HTTPException(status_code=404, detail="Script debug.ps1 non trovato")
+
+
+@app.get("/debug.sh")
+async def serve_debug_sh():
+    """Restituisce lo script Shell per eseguire la sonda di diagnostica su Linux."""
+    script_path = os.path.join(static_dir, "debug.sh")
+    if os.path.isfile(script_path):
+        return FileResponse(
+            script_path,
+            media_type="text/x-shellscript; charset=utf-8",
+            headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
+        )
+    raise HTTPException(status_code=404, detail="Script debug.sh non trovato")
 
 
 @app.get("/download/agent.tar.gz")
