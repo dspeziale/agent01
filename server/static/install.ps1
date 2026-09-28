@@ -38,8 +38,83 @@ if (-not $isAdmin) {
     return
 }
 
-# 2. Verifica / Installazione di Python
-Write-Host "[1/5] Verifica interprete Python..." -ForegroundColor Yellow
+# 2. Disinstallazione completa di qualsiasi versione precedente
+Write-Host "[1/6] Verifica e rimozione completa di versioni precedenti..." -ForegroundColor Yellow
+
+$hadPrevious = $false
+
+# A. Arresto e rimozione di tutte le Attività Pianificate Sysmon
+$tasksToCheck = @($TaskName, "${TaskName}_Watchdog", "Sysmon")
+foreach ($t in $tasksToCheck) {
+    $exists = $false
+    if (Get-Command Get-ScheduledTask -ErrorAction SilentlyContinue) {
+        if (Get-ScheduledTask -TaskName $t -ErrorAction SilentlyContinue) { $exists = $true }
+    }
+    if (-not $exists) {
+        $schCheck = cmd.exe /c "schtasks.exe /Query /TN $t 2>nul"
+        if ($LASTEXITCODE -eq 0 -and $schCheck) { $exists = $true }
+    }
+    if ($exists) {
+        $hadPrevious = $true
+        Write-Host "  -> Rimozione Attivita' Pianificata precedente: $t..." -ForegroundColor Yellow
+        if (Get-Command Stop-ScheduledTask -ErrorAction SilentlyContinue) {
+            Stop-ScheduledTask -TaskName $t -ErrorAction SilentlyContinue | Out-Null
+        }
+        if (Get-Command Unregister-ScheduledTask -ErrorAction SilentlyContinue) {
+            Unregister-ScheduledTask -TaskName $t -Confirm:$false -ErrorAction SilentlyContinue | Out-Null
+        }
+        cmd.exe /c "schtasks.exe /End /TN $t 2>nul" | Out-Null
+        cmd.exe /c "schtasks.exe /Delete /TN $t /F 2>nul" | Out-Null
+    }
+}
+
+# B. Terminazione forzata di qualsiasi processo precedente attivo
+$oldProcs = Get-CimInstance Win32_Process | Where-Object { 
+    ($_.CommandLine -like "*main.py*" -and $_.CommandLine -like "*Sysmon*") -or 
+    ($_.CommandLine -like "*sysmon_service.vbs*") -or
+    ($_.CommandLine -like "*debug_probe.py*" -and $_.ProcessId -ne $PID)
+}
+if ($oldProcs) {
+    $hadPrevious = $true
+    Write-Host "  -> Arresto forzato di $($oldProcs.Count) processi Sysmon in background..." -ForegroundColor Yellow
+    foreach ($p in $oldProcs) {
+        try { Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue } catch {}
+    }
+    Start-Sleep -Seconds 1
+}
+
+# C. Pulizia completa file obsoleti nella directory di installazione
+if (Test-Path $InstallDir) {
+    $hadPrevious = $true
+    Write-Host "  -> Pulizia file e moduli della versione precedente in $InstallDir..." -ForegroundColor Yellow
+    
+    # Rimuove file di codice e script legacy
+    $filesToClean = @("sysmon_service.vbs", "main.py", "debug_probe.py", "requirements-agent.txt", "sysmon_buffer.db")
+    foreach ($f in $filesToClean) {
+        $fp = Join-Path $InstallDir $f
+        if (Test-Path $fp) { Remove-Item -Path $fp -Force -Recurse -ErrorAction SilentlyContinue }
+    }
+    
+    # Rimuove l'intero modulo sysmon per evitare file sorgente orfani
+    $oldPkg = Join-Path $InstallDir "sysmon"
+    if (Test-Path $oldPkg) {
+        Remove-Item -Path $oldPkg -Force -Recurse -ErrorAction SilentlyContinue
+    }
+    
+    # Rimuove cartelle __pycache__
+    Get-ChildItem -Path $InstallDir -Filter "__pycache__" -Recurse -Directory -ErrorAction SilentlyContinue | ForEach-Object {
+        Remove-Item -Path $_.FullName -Force -Recurse -ErrorAction SilentlyContinue
+    }
+}
+
+if ($hadPrevious) {
+    Write-Host "  -> Disinstallazione e pulizia completata con successo." -ForegroundColor Green
+} else {
+    Write-Host "  -> Nessuna versione precedente rilevata (installazione pulita)." -ForegroundColor Green
+}
+
+# 3. Verifica / Installazione di Python
+Write-Host "`n[2/6] Verifica interprete Python..." -ForegroundColor Yellow
 $PythonCmd = Get-Command python.exe -ErrorAction SilentlyContinue
 
 if (-not $PythonCmd) {
@@ -66,8 +141,8 @@ if (-not $PythonCmd) {
 $pyVer = & python.exe --version
 Write-Host "  -> Rilevato: $pyVer (OK)" -ForegroundColor Green
 
-# 3. Download bundle agente dal server
-Write-Host "`n[2/5] Download agente telemetria da $ServerUrl..." -ForegroundColor Yellow
+# 4. Download bundle agente dal server
+Write-Host "`n[3/6] Download agente telemetria da $ServerUrl..." -ForegroundColor Yellow
 if (-not (Test-Path $InstallDir)) {
     New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
 }
@@ -103,6 +178,9 @@ if (Test-Path (Join-Path $tempExtract "sysmon")) {
     if (Test-Path (Join-Path $tempExtract "requirements-agent.txt")) {
         Copy-Item -Path (Join-Path $tempExtract "requirements-agent.txt") -Destination $InstallDir -Force
     }
+    if (Test-Path (Join-Path $tempExtract "debug_probe.py")) {
+        Copy-Item -Path (Join-Path $tempExtract "debug_probe.py") -Destination $InstallDir -Force
+    }
 } else {
     $subDir = Get-ChildItem -Path $tempExtract -Directory | Select-Object -First 1
     if ($subDir -and (Test-Path (Join-Path $subDir.FullName "sysmon"))) {
@@ -111,13 +189,16 @@ if (Test-Path (Join-Path $tempExtract "sysmon")) {
         if (Test-Path (Join-Path $subDir.FullName "requirements-agent.txt")) {
             Copy-Item -Path (Join-Path $subDir.FullName "requirements-agent.txt") -Destination $InstallDir -Force
         }
+        if (Test-Path (Join-Path $subDir.FullName "debug_probe.py")) {
+            Copy-Item -Path (Join-Path $subDir.FullName "debug_probe.py") -Destination $InstallDir -Force
+        }
     }
 }
 Remove-Item -Path $tempExtract -Recurse -Force -ErrorAction SilentlyContinue
 Write-Host "  -> File dell'agente posizionati in $InstallDir" -ForegroundColor Green
 
-# 4. Ambiente virtuale (.venv) e dipendenze
-Write-Host "`n[3/5] Configurazione ambiente virtuale isolato (.venv)..." -ForegroundColor Yellow
+# 5. Ambiente virtuale (.venv) e dipendenze
+Write-Host "`n[4/6] Configurazione ambiente virtuale isolato (.venv)..." -ForegroundColor Yellow
 $VenvDir = Join-Path $InstallDir ".venv"
 $VenvPython = Join-Path $VenvDir "Scripts\python.exe"
 $VenvPip = Join-Path $VenvDir "Scripts\pip.exe"
@@ -135,8 +216,8 @@ if (Test-Path $ReqFile) {
 }
 Write-Host "  -> Dipendenze psutil e requests installate con successo." -ForegroundColor Green
 
-# 5. Generazione config.json
-Write-Host "`n[4/5] Configurazione parametri operativi (config.json)..." -ForegroundColor Yellow
+# 6. Generazione config.json e test iniziale
+Write-Host "`n[5/6] Configurazione parametri operativi (config.json) e test invio..." -ForegroundColor Yellow
 $ConfigFile = Join-Path $InstallDir "config.json"
 $BufferDbPath = Join-Path $InstallDir "sysmon_buffer.db"
 $LogFilePath = Join-Path $InstallDir "sysmon.log"
@@ -164,7 +245,7 @@ $utf8NoBom = New-Object System.Text.UTF8Encoding $false
 Write-Host "  -> Endpoint metriche: $MetricsUrl" -ForegroundColor Cyan
 Write-Host "  -> Frequenza invio: ogni ${Interval}s" -ForegroundColor Cyan
 
-# 4.1 Copia / Download sonda di debug
+# Copia / Download sonda di debug
 if (Test-Path (Join-Path $tempExtract "debug_probe.py")) {
     Copy-Item -Path (Join-Path $tempExtract "debug_probe.py") -Destination $InstallDir -Force
 } else {
@@ -173,8 +254,8 @@ if (Test-Path (Join-Path $tempExtract "debug_probe.py")) {
     } catch {}
 }
 
-# 5. Test di invio iniziale (--once)
-Write-Host "`n[5/6] Test di connessione e primo invio telemetria (--once)..." -ForegroundColor Yellow
+# Test di invio iniziale (--once)
+Write-Host "  -> Esecuzione test di connessione iniziale (--once)..." -ForegroundColor Yellow
 $testResult = & "$VenvDir\Scripts\python.exe" "$InstallDir\main.py" --config "$ConfigFile" --once 2>&1
 if ($LASTEXITCODE -eq 0) {
     Write-Host "  -> Primo pacchetto telemetrico inviato con successo al server!" -ForegroundColor Green
@@ -186,8 +267,8 @@ if ($LASTEXITCODE -eq 0) {
     Write-Host "  -> Puoi diagnosticare a video cosa accade eseguendo: irm $ServerUrl/debug.ps1 | iex" -ForegroundColor Cyan
 }
 
-# 6. Registrazione Attività Pianificata (Avvio automatico invisibile)
-Write-Host "`n[6/6] Registrazione Attivita' Pianificata ($TaskName)..." -ForegroundColor Yellow
+# 7. Registrazione Attività Pianificata (Avvio automatico invisibile con Watchdog)
+Write-Host "`n[6/6] Registrazione Attivita' Pianificata ($TaskName) con Watchdog..." -ForegroundColor Yellow
 $VenvPythonW = Join-Path $VenvDir "Scripts\pythonw.exe"
 if (-not (Test-Path $VenvPythonW)) { $VenvPythonW = $VenvPython }
 $MainPy = Join-Path $InstallDir "main.py"

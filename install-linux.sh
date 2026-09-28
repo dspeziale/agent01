@@ -120,23 +120,26 @@ if [ "$UNINSTALL" = true ]; then
     echo -e "${YELLOW}==========================================================${NC}"
     
     if command -v systemctl &>/dev/null; then
-        if systemctl is-active --quiet "$SERVICE_NAME" 2>/dev/null; then
-            echo -e "${CYAN}[1/3] Arresto del servizio $SERVICE_NAME...${NC}"
-            systemctl stop "$SERVICE_NAME" || true
-        fi
-        if [ -f "/etc/systemd/system/$SERVICE_NAME" ]; then
-            echo -e "${CYAN}[2/3] Rimozione del servizio systemd...${NC}"
-            systemctl disable "$SERVICE_NAME" 2>/dev/null || true
-            rm -f "/etc/systemd/system/$SERVICE_NAME"
-            systemctl daemon-reload || true
-        fi
+        for s in "$SERVICE_NAME" "sysmon" "sysmon.service"; do
+            if systemctl is-active --quiet "$s" 2>/dev/null || systemctl is-enabled --quiet "$s" 2>/dev/null || [ -f "/etc/systemd/system/$s" ]; then
+                echo -e "${CYAN}  -> Rimozione servizio systemd: $s...${NC}"
+                systemctl stop "$s" 2>/dev/null || true
+                systemctl disable "$s" 2>/dev/null || true
+                rm -f "/etc/systemd/system/$s"
+                rm -rf "/etc/systemd/system/${s}.d"
+            fi
+        done
+        systemctl daemon-reload || true
+        systemctl reset-failed 2>/dev/null || true
     fi
 
-    # Uccisione di eventuali processi rimasti
-    pkill -f "$INSTALL_DIR/main.py" 2>/dev/null || true
+    # Uccisione forzata di eventuali processi rimasti
+    pkill -9 -f "$INSTALL_DIR/main.py" 2>/dev/null || true
+    pkill -9 -f "sysmon.*main.py" 2>/dev/null || true
+    pkill -9 -f "$INSTALL_DIR/debug_probe.py" 2>/dev/null || true
 
     if [ -d "$INSTALL_DIR" ]; then
-        echo -e "${CYAN}[3/3] Eliminazione cartella $INSTALL_DIR...${NC}"
+        echo -e "${CYAN}  -> Eliminazione cartella $INSTALL_DIR...${NC}"
         rm -rf "$INSTALL_DIR"
     fi
 
@@ -166,9 +169,62 @@ if [ "$INTERACTIVE" = true ]; then
 fi
 
 # ------------------------------------------------------------------------------
-# 4. INSTALLAZIONE PACCHETTI DI SISTEMA (Python 3, pip, venv, curl)
+# 4. VERIFICA E RIMOZIONE COMPLETA DI VERSIONI PRECEDENTI
 # ------------------------------------------------------------------------------
-echo -e "${YELLOW}[1/5] Rilevamento sistema e installazione dipendenze di sistema...${NC}"
+echo -e "${YELLOW}[1/6] Verifica e rimozione completa di versioni precedenti...${NC}"
+HAD_PREVIOUS=false
+
+# A. Arresto e rimozione di qualsiasi servizio systemd Sysmon
+if command -v systemctl &>/dev/null; then
+    for s in "$SERVICE_NAME" "sysmon" "sysmon.service"; do
+        if systemctl is-active --quiet "$s" 2>/dev/null || systemctl is-enabled --quiet "$s" 2>/dev/null || [ -f "/etc/systemd/system/$s" ]; then
+            HAD_PREVIOUS=true
+            echo -e "  -> Rimozione servizio systemd precedente: $s..."
+            systemctl stop "$s" 2>/dev/null || true
+            systemctl disable "$s" 2>/dev/null || true
+            rm -f "/etc/systemd/system/$s"
+            rm -rf "/etc/systemd/system/${s}.d"
+        fi
+    done
+    if [ "$HAD_PREVIOUS" = true ]; then
+        systemctl daemon-reload 2>/dev/null || true
+        systemctl reset-failed 2>/dev/null || true
+    fi
+fi
+
+# B. Terminazione forzata di eventuali processi Sysmon residenti
+OLD_PIDS=$(pgrep -f "sysmon.*main.py|$INSTALL_DIR/main.py|debug_probe.py" 2>/dev/null || true)
+if [ -n "$OLD_PIDS" ]; then
+    HAD_PREVIOUS=true
+    echo -e "  -> Arresto forzato processi Sysmon attivi..."
+    pkill -9 -f "sysmon.*main.py" 2>/dev/null || true
+    pkill -9 -f "$INSTALL_DIR/main.py" 2>/dev/null || true
+    pkill -9 -f "$INSTALL_DIR/debug_probe.py" 2>/dev/null || true
+    sleep 1
+fi
+
+# C. Pulizia completa file e moduli obsoleti nella cartella di installazione
+if [ -d "$INSTALL_DIR" ]; then
+    if [ -d "$INSTALL_DIR/sysmon" ] || [ -f "$INSTALL_DIR/main.py" ] || [ -f "$INSTALL_DIR/config.json" ]; then
+        HAD_PREVIOUS=true
+        echo -e "  -> Pulizia file e moduli della versione precedente in $INSTALL_DIR..."
+        rm -rf "$INSTALL_DIR/sysmon"
+        rm -f "$INSTALL_DIR/main.py" "$INSTALL_DIR/debug_probe.py" "$INSTALL_DIR/requirements-agent.txt"
+        rm -f "$INSTALL_DIR/sysmon_buffer.db"
+        find "$INSTALL_DIR" -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
+    fi
+fi
+
+if [ "$HAD_PREVIOUS" = true ]; then
+    echo -e "  -> ${GREEN}Disinstallazione e pulizia completata con successo.${NC}"
+else
+    echo -e "  -> ${GREEN}Nessuna versione precedente rilevata (installazione pulita).${NC}"
+fi
+
+# ------------------------------------------------------------------------------
+# 5. INSTALLAZIONE PACCHETTI DI SISTEMA (Python 3, pip, venv, curl)
+# ------------------------------------------------------------------------------
+echo -e "\n${YELLOW}[2/6] Rilevamento sistema e installazione dipendenze di sistema...${NC}"
 
 if command -v apt-get &>/dev/null; then
     echo -e "  -> Gestore pacchetti rilevato: ${CYAN}apt (Debian/Ubuntu)${NC}"
@@ -204,9 +260,9 @@ PY_VER=$(python3 --version 2>&1)
 echo -e "  -> ${GREEN}Interprete attivo: $PY_VER${NC}"
 
 # ------------------------------------------------------------------------------
-# 5. PREPARAZIONE FILE DI SORGENTE
+# 6. PREPARAZIONE FILE DI SORGENTE
 # ------------------------------------------------------------------------------
-echo -e "\n${YELLOW}[2/5] Predisposizione cartella applicazione in $INSTALL_DIR...${NC}"
+echo -e "\n${YELLOW}[3/6] Predisposizione cartella applicazione in $INSTALL_DIR...${NC}"
 mkdir -p "$INSTALL_DIR"
 
 SCRIPT_DIR=""
@@ -269,9 +325,9 @@ if [ "$SOURCE_FOUND" = false ]; then
 fi
 
 # ------------------------------------------------------------------------------
-# 6. CONFIGURAZIONE AMBIENTE VIRTUALE PYTHON (.venv)
+# 7. CONFIGURAZIONE AMBIENTE VIRTUALE PYTHON (.venv)
 # ------------------------------------------------------------------------------
-echo -e "\n${YELLOW}[3/5] Creazione ambiente virtuale isolato (.venv)...${NC}"
+echo -e "\n${YELLOW}[4/6] Creazione ambiente virtuale isolato (.venv)...${NC}"
 VENV_DIR="$INSTALL_DIR/.venv"
 
 if [ ! -f "$VENV_DIR/bin/python" ]; then
@@ -293,9 +349,9 @@ fi
 echo -e "  -> ${GREEN}Dipendenze Python installate con successo nel venv.${NC}"
 
 # ------------------------------------------------------------------------------
-# 7. GENERAZIONE CONFIGURAZIONE (config.json)
+# 8. GENERAZIONE CONFIGURAZIONE (config.json) E TEST
 # ------------------------------------------------------------------------------
-echo -e "\n${YELLOW}[4/5] Configurazione parametri operativi (config.json)...${NC}"
+echo -e "\n${YELLOW}[5/6] Configurazione parametri operativi (config.json) e test invio...${NC}"
 CONFIG_FILE="$INSTALL_DIR/config.json"
 
 AUTH_TYPE="None"
@@ -327,14 +383,25 @@ echo -e "  -> Server di destinazione: ${CYAN}$SERVER_URL${NC}"
 echo -e "  -> Intervallo campionamento: ${CYAN}ogni ${INTERVAL}s${NC}"
 echo -e "  -> Permessi ristretti applicati (chmod 600)"
 
+# Test di invio iniziale (--once)
+echo -e "  -> Test di connessione e primo invio telemetria (--once)..."
+TEST_OUTPUT=$("$VENV_DIR/bin/python" "$INSTALL_DIR/main.py" --config "$CONFIG_FILE" --once 2>&1)
+TEST_STATUS=$?
+if [ $TEST_STATUS -eq 0 ]; then
+    echo -e "  -> ${GREEN}Primo pacchetto telemetrico inviato con successo al server!${NC}"
+else
+    echo -e "  -> ${YELLOW}[AVVISO] Invio iniziale non completato (exit code: $TEST_STATUS):${NC}"
+    echo "$TEST_OUTPUT" | sed 's/^/     /'
+fi
+
 # Copia questo installer in /opt/sysmon per consentire comode disinstallazioni o cambi config
 cp "$0" "$INSTALL_DIR/install-linux.sh" 2>/dev/null || true
 chmod +x "$INSTALL_DIR/install-linux.sh" 2>/dev/null || true
 
 # ------------------------------------------------------------------------------
-# 8. REGISTRAZIONE E AVVIO SERVIZIO SYSTEMD
+# 9. REGISTRAZIONE E AVVIO SERVIZIO SYSTEMD
 # ------------------------------------------------------------------------------
-echo -e "\n${YELLOW}[5/5] Registrazione e avvio servizio Systemd ($SERVICE_NAME)...${NC}"
+echo -e "\n${YELLOW}[6/6] Registrazione e avvio servizio Systemd ($SERVICE_NAME)...${NC}"
 
 if command -v systemctl &>/dev/null; then
     SERVICE_FILE="/etc/systemd/system/$SERVICE_NAME"

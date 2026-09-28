@@ -123,21 +123,44 @@ if ($Uninstall) {
     Write-Host "         DISINSTALLAZIONE AGENTE SYSMON (WINDOWS)         " -ForegroundColor Yellow
     Write-Host "==========================================================" -ForegroundColor Yellow
     
-    Write-Host "[1/3] Arresto e cancellazione Attivita' Pianificata $TaskName..." -ForegroundColor Cyan
-    cmd.exe /c "schtasks.exe /End /TN $TaskName 2>nul" | Out-Null
-    cmd.exe /c "schtasks.exe /Delete /TN $TaskName /F 2>nul" | Out-Null
+    Write-Host "[1/3] Arresto e cancellazione Attivita' Pianificate Sysmon..." -ForegroundColor Cyan
+    $tasksToCheck = @($TaskName, "${TaskName}_Watchdog", "Sysmon")
+    foreach ($t in $tasksToCheck) {
+        if (Get-Command Stop-ScheduledTask -ErrorAction SilentlyContinue) {
+            Stop-ScheduledTask -TaskName $t -ErrorAction SilentlyContinue | Out-Null
+        }
+        if (Get-Command Unregister-ScheduledTask -ErrorAction SilentlyContinue) {
+            Unregister-ScheduledTask -TaskName $t -Confirm:$false -ErrorAction SilentlyContinue | Out-Null
+        }
+        cmd.exe /c "schtasks.exe /End /TN $t 2>nul" | Out-Null
+        cmd.exe /c "schtasks.exe /Delete /TN $t /F 2>nul" | Out-Null
+    }
 
-    Write-Host "[2/3] Terminazione di eventuali processi residenti in background..." -ForegroundColor Cyan
-    Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like "*sysmon*" -or $_.CommandLine -like "*main.py*" } | ForEach-Object {
+    Write-Host "[2/3] Terminazione forzata di eventuali processi residenti in background..." -ForegroundColor Cyan
+    Get-CimInstance Win32_Process | Where-Object { 
+        ($_.CommandLine -like "*main.py*" -and $_.CommandLine -like "*Sysmon*") -or 
+        ($_.CommandLine -like "*sysmon_service.vbs*") -or
+        ($_.CommandLine -like "*debug_probe.py*" -and $_.ProcessId -ne $PID)
+    } | ForEach-Object {
         Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
     }
 
-    $vbsFile = Join-Path $InstallDir "sysmon_service.vbs"
-    if (Test-Path $vbsFile) {
-        Remove-Item -Path $vbsFile -Force -ErrorAction SilentlyContinue
+    Write-Host "[3/3] Pulizia file e moduli della precedente installazione..." -ForegroundColor Cyan
+    if (Test-Path $InstallDir) {
+        $filesToClean = @("sysmon_service.vbs", "main.py", "debug_probe.py", "requirements-agent.txt", "sysmon_buffer.db")
+        foreach ($f in $filesToClean) {
+            $fp = Join-Path $InstallDir $f
+            if (Test-Path $fp) { Remove-Item -Path $fp -Force -Recurse -ErrorAction SilentlyContinue }
+        }
+        $oldPkg = Join-Path $InstallDir "sysmon"
+        if (Test-Path $oldPkg) {
+            Remove-Item -Path $oldPkg -Force -Recurse -ErrorAction SilentlyContinue
+        }
+        Get-ChildItem -Path $InstallDir -Filter "__pycache__" -Recurse -Directory -ErrorAction SilentlyContinue | ForEach-Object {
+            Remove-Item -Path $_.FullName -Force -Recurse -ErrorAction SilentlyContinue
+        }
     }
 
-    Write-Host "[3/3] Pulizia completata." -ForegroundColor Cyan
     Write-Host "[OK] Agente Sysmon disinstallato con successo dal sistema!`n" -ForegroundColor Green
     exit 0
 }
@@ -150,8 +173,76 @@ Write-Host "==========================================================" -Foregro
 Write-Host "       SYSMON AGENT - INSTALLATORE AUTOMATICO WINDOWS      " -ForegroundColor Cyan
 Write-Host "==========================================================`n" -ForegroundColor Cyan
 
+# 0. Verifica e disinstallazione preventiva di versioni precedenti
+Write-Host "[1/6] Verifica e rimozione completa di versioni precedenti..." -ForegroundColor Yellow
+$hadPrevious = $false
+
+# A. Arresto e rimozione di tutte le Attività Pianificate Sysmon
+$tasksToCheck = @($TaskName, "${TaskName}_Watchdog", "Sysmon")
+foreach ($t in $tasksToCheck) {
+    $exists = $false
+    if (Get-Command Get-ScheduledTask -ErrorAction SilentlyContinue) {
+        if (Get-ScheduledTask -TaskName $t -ErrorAction SilentlyContinue) { $exists = $true }
+    }
+    if (-not $exists) {
+        $schCheck = cmd.exe /c "schtasks.exe /Query /TN $t 2>nul"
+        if ($LASTEXITCODE -eq 0 -and $schCheck) { $exists = $true }
+    }
+    if ($exists) {
+        $hadPrevious = $true
+        Write-Host "  -> Rimozione Attivita' Pianificata precedente: $t..." -ForegroundColor Yellow
+        if (Get-Command Stop-ScheduledTask -ErrorAction SilentlyContinue) {
+            Stop-ScheduledTask -TaskName $t -ErrorAction SilentlyContinue | Out-Null
+        }
+        if (Get-Command Unregister-ScheduledTask -ErrorAction SilentlyContinue) {
+            Unregister-ScheduledTask -TaskName $t -Confirm:$false -ErrorAction SilentlyContinue | Out-Null
+        }
+        cmd.exe /c "schtasks.exe /End /TN $t 2>nul" | Out-Null
+        cmd.exe /c "schtasks.exe /Delete /TN $t /F 2>nul" | Out-Null
+    }
+}
+
+# B. Terminazione forzata di qualsiasi processo precedente attivo
+$oldProcs = Get-CimInstance Win32_Process | Where-Object { 
+    ($_.CommandLine -like "*main.py*" -and $_.CommandLine -like "*Sysmon*") -or 
+    ($_.CommandLine -like "*sysmon_service.vbs*") -or
+    ($_.CommandLine -like "*debug_probe.py*" -and $_.ProcessId -ne $PID)
+}
+if ($oldProcs) {
+    $hadPrevious = $true
+    Write-Host "  -> Arresto forzato di $($oldProcs.Count) processi Sysmon in background..." -ForegroundColor Yellow
+    foreach ($p in $oldProcs) {
+        try { Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue } catch {}
+    }
+    Start-Sleep -Seconds 1
+}
+
+# C. Pulizia completa file obsoleti nella directory di installazione
+if (Test-Path $InstallDir) {
+    $hadPrevious = $true
+    Write-Host "  -> Pulizia file e moduli della versione precedente in $InstallDir..." -ForegroundColor Yellow
+    $filesToClean = @("sysmon_service.vbs", "main.py", "debug_probe.py", "requirements-agent.txt", "sysmon_buffer.db")
+    foreach ($f in $filesToClean) {
+        $fp = Join-Path $InstallDir $f
+        if (Test-Path $fp) { Remove-Item -Path $fp -Force -Recurse -ErrorAction SilentlyContinue }
+    }
+    $oldPkg = Join-Path $InstallDir "sysmon"
+    if (Test-Path $oldPkg) {
+        Remove-Item -Path $oldPkg -Force -Recurse -ErrorAction SilentlyContinue
+    }
+    Get-ChildItem -Path $InstallDir -Filter "__pycache__" -Recurse -Directory -ErrorAction SilentlyContinue | ForEach-Object {
+        Remove-Item -Path $_.FullName -Force -Recurse -ErrorAction SilentlyContinue
+    }
+}
+
+if ($hadPrevious) {
+    Write-Host "  -> Disinstallazione e pulizia completata con successo." -ForegroundColor Green
+} else {
+    Write-Host "  -> Nessuna versione precedente rilevata (installazione pulita)." -ForegroundColor Green
+}
+
 # 1. Verifica / Installazione di Python
-Write-Host "[1/5] Verifica interprete Python..." -ForegroundColor Yellow
+Write-Host "`n[2/6] Verifica interprete Python..." -ForegroundColor Yellow
 $PythonCmd = Get-Command python.exe -ErrorAction SilentlyContinue
 
 if (-not $PythonCmd) {
@@ -183,7 +274,7 @@ $pyVersion = & python.exe --version
 Write-Host "  -> $pyVersion (OK)" -ForegroundColor Green
 
 # 2. Predisposizione cartella e sorgenti
-Write-Host "`n[2/5] Predisposizione cartella applicazione in $InstallDir..." -ForegroundColor Yellow
+Write-Host "`n[3/6] Predisposizione cartella applicazione in $InstallDir..." -ForegroundColor Yellow
 if (-not (Test-Path $InstallDir)) {
     New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
 }
@@ -214,7 +305,7 @@ if (-not $hasLocalSources) {
 }
 
 # 3. Creazione Ambiente Virtuale (.venv) e Installazione Dipendenze
-Write-Host "`n[3/5] Configurazione ambiente virtuale isolato (.venv)..." -ForegroundColor Yellow
+Write-Host "`n[4/6] Configurazione ambiente virtuale isolato (.venv)..." -ForegroundColor Yellow
 $VenvDir = Join-Path $InstallDir ".venv"
 $VenvPython = Join-Path $VenvDir "Scripts\python.exe"
 $VenvPip = Join-Path $VenvDir "Scripts\pip.exe"
@@ -235,7 +326,7 @@ if (Test-Path $ReqFile) {
 Write-Host "  -> Dipendenze Python installate con successo nel virtualenv." -ForegroundColor Green
 
 # 4. Creazione File config.json
-Write-Host "`n[4/5] Configurazione parametri operativi (config.json)..." -ForegroundColor Yellow
+Write-Host "`n[5/6] Configurazione parametri operativi (config.json) e test invio..." -ForegroundColor Yellow
 $ConfigFile = Join-Path $InstallDir "config.json"
 $BufferDbPath = Join-Path $InstallDir "sysmon_buffer.db"
 $LogFilePath = Join-Path $InstallDir "sysmon.log"
@@ -270,8 +361,8 @@ if (Test-Path (Join-Path $tempExtract "debug_probe.py")) {
     Copy-Item -Path (Join-Path $tempExtract "debug_probe.py") -Destination $InstallDir -Force
 }
 
-# 5. Test di invio iniziale (--once)
-Write-Host "`n[5/6] Test di connessione e primo invio telemetria (--once)..." -ForegroundColor Yellow
+# Test di invio iniziale (--once)
+Write-Host "  -> Test di connessione e primo invio telemetria (--once)..." -ForegroundColor Yellow
 $testResult = & "$VenvDir\Scripts\python.exe" "$InstallDir\main.py" --config "$ConfigFile" --once 2>&1
 if ($LASTEXITCODE -eq 0) {
     Write-Host "  -> Primo pacchetto telemetrico inviato con successo al server!" -ForegroundColor Green
@@ -282,7 +373,7 @@ if ($LASTEXITCODE -eq 0) {
     }
 }
 
-# 6. Registrazione Servizio / Attività Pianificata (Avvio automatico al boot)
+# 5. Registrazione Servizio / Attività Pianificata (Avvio automatico al boot)
 Write-Host "`n[6/6] Registrazione Attivita' Pianificata Windows ($TaskName)..." -ForegroundColor Yellow
 
 $VenvPythonW = Join-Path $VenvDir "Scripts\pythonw.exe"

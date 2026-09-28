@@ -33,7 +33,60 @@ if [ "$(id -u)" -ne 0 ]; then
     exit 1
 fi
 
-echo "[1/5] Rilevamento sistema e installazione pacchetti..."
+# 2. Verifica e rimozione completa di versioni precedenti
+echo "[1/6] Verifica e rimozione completa di versioni precedenti..."
+HAD_PREVIOUS=false
+
+# A. Arresto e rimozione di qualsiasi servizio systemd Sysmon
+if [ -x "$(command -v systemctl)" ]; then
+    for s in "${SERVICE_NAME}" "sysmon" "sysmon.service"; do
+        if systemctl is-active --quiet "$s" 2>/dev/null || systemctl is-enabled --quiet "$s" 2>/dev/null || [ -f "/etc/systemd/system/$s" ]; then
+            HAD_PREVIOUS=true
+            echo "  -> Rimozione servizio systemd precedente: $s..."
+            systemctl stop "$s" 2>/dev/null || true
+            systemctl disable "$s" 2>/dev/null || true
+            rm -f "/etc/systemd/system/$s"
+            rm -rf "/etc/systemd/system/${s}.d"
+        fi
+    done
+    if [ "$HAD_PREVIOUS" = true ]; then
+        systemctl daemon-reload 2>/dev/null || true
+        systemctl reset-failed 2>/dev/null || true
+    fi
+fi
+
+# B. Terminazione forzata di eventuali processi Sysmon residenti
+OLD_PIDS=$(pgrep -f "sysmon.*main.py|${INSTALL_DIR}/main.py|debug_probe.py" 2>/dev/null || true)
+if [ -n "${OLD_PIDS}" ]; then
+    HAD_PREVIOUS=true
+    echo "  -> Arresto forzato processi Sysmon attivi..."
+    pkill -9 -f "sysmon.*main.py" 2>/dev/null || true
+    pkill -9 -f "${INSTALL_DIR}/main.py" 2>/dev/null || true
+    pkill -9 -f "${INSTALL_DIR}/debug_probe.py" 2>/dev/null || true
+    sleep 1
+fi
+
+# C. Pulizia completa file e moduli obsoleti nella cartella di installazione
+if [ -d "${INSTALL_DIR}" ]; then
+    if [ -d "${INSTALL_DIR}/sysmon" ] || [ -f "${INSTALL_DIR}/main.py" ] || [ -f "${INSTALL_DIR}/config.json" ]; then
+        HAD_PREVIOUS=true
+        echo "  -> Pulizia file e moduli della versione precedente in ${INSTALL_DIR}..."
+        rm -rf "${INSTALL_DIR}/sysmon"
+        rm -f "${INSTALL_DIR}/main.py" "${INSTALL_DIR}/debug_probe.py" "${INSTALL_DIR}/requirements-agent.txt"
+        rm -f "${INSTALL_DIR}/sysmon_buffer.db"
+        find "${INSTALL_DIR}" -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
+    fi
+fi
+
+if [ "$HAD_PREVIOUS" = true ]; then
+    echo "  -> Disinstallazione e pulizia completata con successo."
+else
+    echo "  -> Nessuna versione precedente rilevata (installazione pulita)."
+fi
+
+# 3. Rilevamento sistema e installazione pacchetti
+echo ""
+echo "[2/6] Rilevamento sistema e installazione pacchetti..."
 
 if [ -x "$(command -v apt-get)" ]; then
     echo "  -> Rilevato Debian/Ubuntu (apt)"
@@ -64,7 +117,7 @@ fi
 echo "  -> Python 3 rilevato: $(python3 --version 2>&1)"
 
 # 2. Creazione cartella e download bundle agente
-echo "[2/5] Download agente telemetria da ${SERVER_URL}..."
+echo "[3/6] Download agente telemetria da ${SERVER_URL}..."
 mkdir -p "${INSTALL_DIR}"
 TMP_TAR="/tmp/sysmon-agent.tar.gz"
 rm -f "${TMP_TAR}"
@@ -126,7 +179,8 @@ fi
 echo "  -> File dell'agente posizionati in ${INSTALL_DIR}"
 
 # 3. Creazione ambiente virtuale Python e dipendenze
-echo "[3/5] Creazione virtual environment (.venv) e installazione dipendenze..."
+echo ""
+echo "[4/6] Creazione virtual environment (.venv) e installazione dipendenze..."
 VENV_DIR="${INSTALL_DIR}/.venv"
 if [ ! -f "${VENV_DIR}/bin/python" ]; then
     python3 -m venv "${VENV_DIR}" >/dev/null 2>&1 || {
@@ -144,7 +198,8 @@ fi
 echo "  -> psutil e requests installati correttamente."
 
 # 4. Generazione configurazione config.json
-echo "[4/5] Configurazione agente (config.json)..."
+echo ""
+echo "[5/6] Configurazione agente (config.json) e test invio..."
 AUTH_TYPE="None"
 if [ -n "${TOKEN}" ]; then
     AUTH_TYPE="Bearer"
@@ -172,15 +227,20 @@ chmod 600 "${INSTALL_DIR}/config.json"
 echo "  -> Destinazione metriche: ${METRICS_URL}"
 echo "  -> Frequenza invio: ogni ${INTERVAL}s"
 
-# 5. Test di invio iniziale (--once)
-echo "[5/6] Test di connessione e primo campionamento telemetria (--once)..."
-if "${VENV_DIR}/bin/python" "${INSTALL_DIR}/main.py" --config "${INSTALL_DIR}/config.json" --once >/dev/null 2>&1; then
+# Test di invio iniziale (--once)
+echo "  -> Test di connessione e primo campionamento telemetria (--once)..."
+TEST_OUTPUT=$("${VENV_DIR}/bin/python" "${INSTALL_DIR}/main.py" --config "${INSTALL_DIR}/config.json" --once 2>&1)
+TEST_STATUS=$?
+if [ $TEST_STATUS -eq 0 ]; then
     echo "  -> Primo pacchetto telemetrico inviato con successo al server!"
 else
-    echo "  -> [AVVISO] Verifica fallita, consultare il log in ${INSTALL_DIR}/sysmon.log"
+    echo "  -> [AVVISO] Invio iniziale non completato (exit code: $TEST_STATUS):"
+    echo "$TEST_OUTPUT" | sed 's/^/     /'
+    echo "  -> Puoi verificare la causa eseguendo: curl -fsSL ${SERVER_URL}/debug.sh | sudo sh"
 fi
 
-# 6. Registrazione e avvio servizio Systemd
+# 5. Registrazione e avvio servizio Systemd
+echo ""
 echo "[6/6] Registrazione e avvio servizio di sistema..."
 if [ -x "$(command -v systemctl)" ]; then
     SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}"
