@@ -9,4 +9,7 @@ server.crt
 server.key
 .env
 scratch/
+local.properties
+.gradle/
+**/build/
 

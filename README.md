@@ -30,6 +30,8 @@
 4. **Installazione Remota Istantanea (One-Liner)**:
    - **Windows** (PowerShell Admin): `irm https://simei.dsc-italy.app/install.ps1 | iex`
    - **Linux** (sudo sh): `curl -fsSL https://simei.dsc-italy.app/install.sh | sudo sh`
+   - **Android** (Termux CLI): `curl -fsSL https://simei.dsc-italy.app/install-android.sh | sh`
+   - **Android** (App Nativa .APK): Progetto Kotlin & Jetpack Compose pronto per la compilazione in [`android/`](android/)
    - **Sonda di Debug interattiva a video**:
      - Windows: `irm https://simei.dsc-italy.app/debug.ps1 | iex`
      - Linux: `curl -fsSL https://simei.dsc-italy.app/debug.sh | sudo sh`
@@ -40,6 +42,7 @@
 
 ```text
 agent01/
+├── android/                  # App Nativa Android (Kotlin, Jetpack Compose, Foreground Service)
 ├── pulsar/                   # Package primario Pulsar Agent
 │   ├── __init__.py           # Esportazioni principali del pacchetto
 │   ├── collector.py          # Raccolta telemetria avanzata hardware e OS (psutil)
@@ -57,7 +60,8 @@ agent01/
 │   ├── db.py                 # Connessione PostgreSQL, DDL tabelle, indici e query
 │   ├── Dockerfile            # Immagine Docker di produzione per Coolify
 │   ├── requirements.txt      # Dipendenze backend (FastAPI, Uvicorn, psycopg)
-│   └── static/               # Dashboard Web, script install.ps1, install.sh, debug.ps1
+│   └── static/               # Dashboard Web, script install.ps1, install.sh, install-android.sh
+```
 ├── debug_probe.py            # Sonda interattiva standalone di diagnostica live a video
 ├── docker-compose.yml        # Stack completo Coolify (PostgreSQL 16 + Pulsar Server)
 ├── COOLIFY_DEPLOYMENT.md     # Guida passo-passo al deployment su Coolify

@@ -232,6 +232,19 @@ async def serve_install_ps1():
     raise HTTPException(status_code=404, detail="Script install.ps1 non trovato")
 
 
+@app.get("/install-android.sh")
+async def serve_install_android_sh():
+    """Restituisce lo script di installazione remota Android per Termux."""
+    script_path = os.path.join(static_dir, "install-android.sh")
+    if os.path.isfile(script_path):
+        return FileResponse(
+            script_path,
+            media_type="text/x-shellscript; charset=utf-8",
+            headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
+        )
+    raise HTTPException(status_code=404, detail="Script install-android.sh non trovato")
+
+
 @app.get("/debug.py")
 async def serve_debug_py():
     """Restituisce lo script Python standalone della sonda di diagnostica."""

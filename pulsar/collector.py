@@ -17,7 +17,7 @@ import logging
 from typing import Dict, Any, List, Optional
 import psutil
 
-logger = logging.getLogger("sysmon.collector")
+logger = logging.getLogger("pulsar.collector")
 
 
 class SystemMetricsCollector:
@@ -81,13 +81,28 @@ class SystemMetricsCollector:
         except Exception as e:
             logger.debug(f"Impossibile leggere utenti connessi: {e}")
 
-        info = {
+        os_name = platform.system()
+        os_release = platform.release()
+        os_version = platform.version()
+
+        # Rilevamento ambiente Android (Termux / chroot / native)
+        is_android = (
+            bool(os.environ.get("ANDROID_ROOT"))
+            or bool(os.environ.get("TERMUX_VERSION"))
+            or os.path.isdir("/data/data/com.termux")
+            or os.path.isfile("/system/build.prop")
+            or ("android" in os_version.lower())
+        )
+        if is_android:
+            os_name = "Android"
+
+        info: Dict[str, Any] = {
             "machine_id": self._machine_id,
             "hostname": socket.gethostname(),
             "fqdn": socket.getfqdn(),
-            "os": platform.system(),
-            "os_release": platform.release(),
-            "os_version": platform.version(),
+            "os": os_name,
+            "os_release": os_release,
+            "os_version": os_version,
             "architecture": platform.machine(),
             "processor": platform.processor(),
             "python_version": platform.python_version(),
@@ -100,12 +115,45 @@ class SystemMetricsCollector:
             "active_users": users_list,
         }
 
-        # Informazioni aggiuntive Windows o Linux
+        # Informazioni aggiuntive Windows o Android
         if platform.system() == "Windows":
             try:
                 info["win32_edition"] = platform.win32_edition()
             except Exception:
                 pass
+        elif is_android:
+            try:
+                import subprocess
+
+                def _getprop(prop_name: str) -> Optional[str]:
+                    try:
+                        res = subprocess.run(["getprop", prop_name], capture_output=True, text=True, timeout=1.5)
+                        v = res.stdout.strip()
+                        return v if v else None
+                    except Exception:
+                        return None
+
+                model = _getprop("ro.product.model")
+                manufacturer = _getprop("ro.product.manufacturer")
+                brand = _getprop("ro.product.brand")
+                android_ver = _getprop("ro.build.version.release")
+                sdk_ver = _getprop("ro.build.version.sdk")
+                device = _getprop("ro.product.device")
+
+                if model:
+                    info["device_model"] = model
+                if manufacturer:
+                    info["device_manufacturer"] = manufacturer
+                if brand:
+                    info["device_brand"] = brand
+                if device:
+                    info["device_name"] = device
+                if android_ver:
+                    info["os_release"] = android_ver
+                if sdk_ver:
+                    info["android_sdk_version"] = sdk_ver
+            except Exception as e:
+                logger.debug(f"Impossibile estrarre getprop Android: {e}")
 
         return info
 
@@ -233,6 +281,28 @@ class SystemMetricsCollector:
                     logger.debug(f"Impossibile leggere disco {part.mountpoint}: {e}")
         except Exception as e:
             logger.warning(f"Errore lettura partizioni: {e}")
+
+        # Fallback per Android/Termux o container con mount isolati
+        if not partitions_data:
+            for cand_path in ("/data", "/sdcard", "/storage/emulated/0", "/"):
+                if os.path.isdir(cand_path):
+                    try:
+                        u = psutil.disk_usage(cand_path)
+                        partitions_data.append({
+                            "device": cand_path,
+                            "mountpoint": cand_path,
+                            "fstype": "ext4/f2fs",
+                            "opts": "rw",
+                            "total_bytes": u.total,
+                            "total_gb": round(u.total / (1024**3), 2),
+                            "used_bytes": u.used,
+                            "used_gb": round(u.used / (1024**3), 2),
+                            "free_bytes": u.free,
+                            "free_gb": round(u.free / (1024**3), 2),
+                            "percent_used": u.percent,
+                        })
+                    except Exception:
+                        pass
 
         disk_result: Dict[str, Any] = {"partitions": partitions_data}
 
@@ -463,6 +533,43 @@ class SystemMetricsCollector:
                 }
         except Exception:
             pass
+
+        # Fallback Batteria per Android (sysfs o termux-battery-status)
+        if "battery" not in sensors:
+            try:
+                cap_file = "/sys/class/power_supply/battery/capacity"
+                st_file = "/sys/class/power_supply/battery/status"
+                if os.path.isfile(cap_file):
+                    with open(cap_file, "r") as f:
+                        b_pct = float(f.read().strip())
+                    plugged = False
+                    if os.path.isfile(st_file):
+                        with open(st_file, "r") as f:
+                            st_val = f.read().strip().lower()
+                            plugged = st_val in ("charging", "full")
+                    sensors["battery"] = {
+                        "percent": b_pct,
+                        "power_plugged": plugged,
+                        "secsleft": None,
+                    }
+            except Exception:
+                pass
+
+        if "battery" not in sensors:
+            try:
+                import subprocess, json
+                res = subprocess.run(["termux-battery-status"], capture_output=True, text=True, timeout=1.5)
+                if res.returncode == 0 and res.stdout.strip():
+                    b_json = json.loads(res.stdout)
+                    sensors["battery"] = {
+                        "percent": float(b_json.get("percentage", 0)),
+                        "power_plugged": b_json.get("plugged") not in (None, "UNPLUGGED"),
+                        "secsleft": None,
+                        "temperature": b_json.get("temperature"),
+                        "health": b_json.get("health"),
+                    }
+            except Exception:
+                pass
 
         # Temperature
         try:
