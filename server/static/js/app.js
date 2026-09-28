@@ -530,3 +530,30 @@ function escapeHtml(str) {
         .replace(/"/g, '&quot;')
         .replace(/'/g, '&#039;');
 }
+
+/* Gestione Modal Installazione Sonda Remota */
+window.openInstallModal = function() {
+    const modal = document.getElementById('installModal');
+    if (modal) modal.style.display = 'flex';
+};
+
+window.closeInstallModal = function() {
+    const modal = document.getElementById('installModal');
+    if (modal) modal.style.display = 'none';
+};
+
+window.copyInstallCmd = function(text, buttonEl) {
+    navigator.clipboard.writeText(text).then(() => {
+        const originalText = buttonEl.textContent;
+        buttonEl.textContent = 'Copiato!';
+        buttonEl.style.background = 'rgba(16, 185, 129, 0.3)';
+        buttonEl.style.color = '#34d399';
+        setTimeout(() => {
+            buttonEl.textContent = originalText;
+            buttonEl.style.background = '';
+            buttonEl.style.color = '';
+        }, 2000);
+    }).catch(err => {
+        console.error('Errore durante la copia:', err);
+    });
+};

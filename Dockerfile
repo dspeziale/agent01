@@ -16,6 +16,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY server /app/server
 COPY sysmon /app/sysmon
+COPY main.py /app/main.py
+COPY requirements-agent.txt /app/requirements-agent.txt
 
 RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
 USER appuser

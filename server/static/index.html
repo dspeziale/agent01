@@ -63,8 +63,13 @@
                 Aggiorna
             </button>
 
-            <a href="/docs" target="_blank" class="btn btn-primary">
-                API Docs (/docs)
+            <button id="openInstallModalBtn" class="btn btn-primary" onclick="openInstallModal()">
+                <svg style="width:14px;height:14px;fill:currentColor;" viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
+                + Installa Sonda
+            </button>
+
+            <a href="/docs" target="_blank" class="btn" style="border-color:var(--border-glass);">
+                API Docs
             </a>
         </div>
     </header>
@@ -267,6 +272,53 @@
             </section>
 
         </main>
+    </div>
+
+    <!-- MODAL INSTALLA SONDA -->
+    <div id="installModal" class="modal-backdrop" style="display:none;" onclick="if(event.target === this) closeInstallModal()">
+        <div class="modal-card">
+            <div class="modal-header">
+                <div style="display:flex; align-items:center; gap:10px;">
+                    <span class="host-pill host-pill-blue">REMOTE AGENT DEPLOY</span>
+                    <h3 style="margin:0; font-size:18px;">Installa Nuova Sonda</h3>
+                </div>
+                <button class="modal-close" onclick="closeInstallModal()">&times;</button>
+            </div>
+            
+            <p style="color:var(--text-muted); font-size:13px; margin:0 0 16px 0; line-height:1.5;">
+                Esegui uno dei comandi seguenti direttamente nel terminale del computer o server da monitorare.
+                L'agente si configurerà automaticamente come servizio di background persistente.
+            </p>
+
+            <!-- Card Windows -->
+            <div class="install-command-card">
+                <div class="install-command-title">
+                    <span style="display:flex; align-items:center; gap:8px;">
+                        <span style="font-size:18px;">🪟</span>
+                        <strong>WINDOWS</strong> <span style="color:var(--text-muted); font-size:12px;">(PowerShell come Amministratore)</span>
+                    </span>
+                    <button class="copy-cmd-btn" onclick="copyInstallCmd('irm https://simei.dsc-italy.app/install.ps1 | iex', this)">Copia</button>
+                </div>
+                <div class="command-box">irm https://simei.dsc-italy.app/install.ps1 | iex</div>
+            </div>
+
+            <!-- Card Linux -->
+            <div class="install-command-card" style="margin-top:14px;">
+                <div class="install-command-title">
+                    <span style="display:flex; align-items:center; gap:8px;">
+                        <span style="font-size:18px;">🐧</span>
+                        <strong>LINUX</strong> <span style="color:var(--text-muted); font-size:12px;">(Terminale con sudo sh)</span>
+                    </span>
+                    <button class="copy-cmd-btn" onclick="copyInstallCmd('curl -fsSL https://simei.dsc-italy.app/install.sh | sudo sh', this)">Copia</button>
+                </div>
+                <div class="command-box">curl -fsSL https://simei.dsc-italy.app/install.sh | sudo sh</div>
+                <div style="font-size:11px; color:var(--text-muted); margin-top:6px;">Alternativa con wget: <code>wget -qO- https://simei.dsc-italy.app/install.sh | sudo sh</code></div>
+            </div>
+
+            <div style="margin-top:20px; text-align:right;">
+                <button class="btn" onclick="closeInstallModal()">Chiudi</button>
+            </div>
+        </div>
     </div>
 
     <!-- Application Script -->
