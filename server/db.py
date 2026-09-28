@@ -122,8 +122,8 @@ class DatabaseManager:
         return f"postgresql://{user}:{password}@{host}:{port}/{db}"
 
     def get_connection(self) -> psycopg.Connection:
-        """Apre una connessione al database PostgreSQL."""
-        return psycopg.connect(self.dsn, row_factory=dict_row)
+        """Apre una connessione al database PostgreSQL con timeout controllato."""
+        return psycopg.connect(self.dsn, row_factory=dict_row, connect_timeout=3)
 
     def init_db(self) -> None:
         """Inizializza le tabelle e gli indici se non esistono."""
@@ -392,3 +392,28 @@ class DatabaseManager:
                 )
                 row = cur.fetchone()
                 return row["raw_payload"] if row else None
+
+    def get_fleet_stats(self) -> Dict[str, Any]:
+        """Restituisce le statistiche aggregate di tutte le macchine per i contatori della dashboard."""
+        try:
+            with self.get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT 
+                            COUNT(DISTINCT m.machine_id) AS total_machines,
+                            COUNT(DISTINCT m.machine_id) FILTER (WHERE m.last_seen_at >= NOW() - INTERVAL '2 minutes') AS online_machines,
+                            (SELECT COUNT(*) FROM telemetry_snapshots) AS total_snapshots
+                        FROM machines m;
+                        """
+                    )
+                    row = cur.fetchone()
+                    return dict(row) if row else {
+                        "total_machines": 0,
+                        "online_machines": 0,
+                        "total_snapshots": 0,
+                    }
+        except Exception as e:
+            logger.error(f"Errore recupero statistiche flotta: {e}")
+            return {"total_machines": 0, "online_machines": 0, "total_snapshots": 0}
+

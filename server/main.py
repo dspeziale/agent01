@@ -14,7 +14,8 @@ from datetime import datetime, timezone
 
 from fastapi import FastAPI, HTTPException, Security, Depends, status, Request
 from fastapi.security.api_key import APIKeyHeader
-from fastapi.responses import JSONResponse, HTMLResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import JSONResponse, HTMLResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 from .db import DatabaseManager
@@ -65,10 +66,13 @@ async def lifespan(app: FastAPI):
     """Gestione ciclo di vita dell'applicazione: auto-inizializzazione schema PostgreSQL."""
     logger.info("Avvio del server Sysmon Telemetry...")
     try:
-        db.init_db()
-        logger.info("Connessione a PostgreSQL stabilita e schema verificato.")
+        if db.check_health():
+            db.init_db()
+            logger.info("Connessione a PostgreSQL stabilita e schema verificato.")
+        else:
+            logger.warning("PostgreSQL non raggiungibile all'avvio. Lo schema verrà inizializzato non appena il database sarà attivo.")
     except Exception as e:
-        logger.error(f"Errore critico durante l'inizializzazione del database: {e}", exc_info=True)
+        logger.warning(f"PostgreSQL non ancora raggiungibile all'avvio: {e}")
     yield
     logger.info("Arresto del server Sysmon Telemetry.")
 
@@ -82,7 +86,7 @@ app = FastAPI(
     redoc_url="/redoc",
 )
 
-# Abilitazione CORS per eventuali frontend/dashboard web
+# Abilitazione CORS per il client web
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -91,43 +95,21 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Montaggio cartella file statici (CSS, JS, dashboard)
+static_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
+if os.path.isdir(static_dir):
+    app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
-@app.get("/", response_class=HTMLResponse)
-async def root():
-    """Pagina di benvenuto con stato del servizio e link alla documentazione OpenAPI."""
-    db_ok = db.check_health()
-    badge_color = "#22c55e" if db_ok else "#ef4444"
-    status_text = "OPERATIVO & CONNESSO A POSTGRES" if db_ok else "ERRORE CONNESSIONE DATABASE"
 
-    html = f"""
-    <!DOCTYPE html>
-    <html lang="it">
-    <head>
-        <meta charset="UTF-8">
-        <title>Sysmon Telemetry Server</title>
-        <style>
-            body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f172a; color: #f8fafc; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; }}
-            .card {{ background: #1e293b; border-radius: 12px; padding: 32px; max-width: 520px; box-shadow: 0 10px 25px rgba(0,0,0,0.5); border: 1px solid #334155; }}
-            h1 {{ margin-top: 0; color: #38bdf8; font-size: 24px; }}
-            p {{ line-height: 1.6; color: #94a3b8; }}
-            .status {{ display: inline-block; padding: 6px 12px; border-radius: 9999px; background: {badge_color}22; color: {badge_color}; border: 1px solid {badge_color}; font-weight: bold; font-size: 13px; margin-bottom: 16px; }}
-            .btn {{ display: inline-block; background: #38bdf8; color: #0f172a; padding: 10px 18px; border-radius: 6px; text-decoration: none; font-weight: bold; margin-top: 12px; transition: background 0.2s; }}
-            .btn:hover {{ background: #7dd3fc; }}
-            code {{ background: #0f172a; padding: 2px 6px; border-radius: 4px; color: #38bdf8; font-family: monospace; }}
-        </style>
-    </head>
-    <body>
-        <div class="card">
-            <div class="status">● {status_text}</div>
-            <h1>Sysmon Telemetry Server v2.0</h1>
-            <p>Il backend riceve le metriche hardware in streaming HTTPS (POST su <code>/api/v1/metrics</code>) e le archivia permanentemente su PostgreSQL.</p>
-            <p>Deploy attivo e pronto su <strong>Coolify</strong>.</p>
-            <a class="btn" href="/docs">Apri Documentazione Swagger API (/docs)</a>
-        </div>
-    </body>
-    </html>
-    """
-    return HTMLResponse(content=html)
+@app.get("/", response_class=FileResponse)
+@app.get("/dashboard", response_class=FileResponse)
+async def serve_dashboard():
+    """Restituisce l'interfaccia Web interattiva per la navigazione della telemetria."""
+    index_file = os.path.join(static_dir, "index.html")
+    if os.path.isfile(index_file):
+        return FileResponse(index_file)
+    return HTMLResponse("<h1>Sysmon Dashboard</h1><p>Interfaccia in fase di inizializzazione...</p>")
+
 
 
 @app.get("/health")
@@ -177,28 +159,25 @@ async def receive_metrics(payload: Dict[str, Any], authenticated: bool = Depends
 async def get_machines(authenticated: bool = Depends(verify_auth_token)):
     """Restituisce l'elenco di tutte le macchine registrate, con stato online/offline e ultime metriche."""
     try:
+        if not db.check_health():
+            return []
         return db.list_machines()
     except Exception as e:
-        logger.error(f"Errore recupero lista macchine: {e}", exc_info=True)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+        logger.error(f"Errore recupero lista macchine: {e}")
+        return []
 
 
 @app.get("/api/v1/machines/{machine_id}")
 async def get_machine_details(machine_id: str, authenticated: bool = Depends(verify_auth_token)):
     """Restituisce l'ultimo snapshot JSONB completo per una specifica macchina."""
     try:
+        if not db.check_health():
+            return {}
         snapshot = db.get_latest_snapshot(machine_id)
-        if not snapshot:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Nessuna telemetria trovata per la macchina '{machine_id}'",
-            )
-        return snapshot
-    except HTTPException:
-        raise
+        return snapshot or {}
     except Exception as e:
-        logger.error(f"Errore recupero macchina {machine_id}: {e}", exc_info=True)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+        logger.error(f"Errore recupero macchina {machine_id}: {e}")
+        return {}
 
 
 @app.get("/api/v1/machines/{machine_id}/history")
@@ -209,8 +188,11 @@ async def get_machine_history(
 ):
     """Restituisce la serie storica delle metriche (CPU, RAM, Rete) di una macchina per grafici."""
     try:
+        if not db.check_health():
+            return {"machine_id": machine_id, "count": 0, "data": []}
         history = db.get_machine_history(machine_id=machine_id, limit=limit)
         return {"machine_id": machine_id, "count": len(history), "data": history}
     except Exception as e:
-        logger.error(f"Errore recupero storico per {machine_id}: {e}", exc_info=True)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+        logger.error(f"Errore recupero storico per {machine_id}: {e}")
+        return {"machine_id": machine_id, "count": 0, "data": []}
+

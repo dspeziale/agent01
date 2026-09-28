@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sysmon Telemetry Dashboard | Monitoraggio Flotta & Metriche</title>
+    <meta name="description" content="Dashboard in tempo reale per l'analisi delle metriche di sistema, CPU, RAM, dischi, rete e processi raccolti da Sysmon.">
+    
+    <!-- Google Fonts: Outfit & Inter -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    
+    <!-- Chart.js via CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script>
+    
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+
+    <!-- TOPBAR -->
+    <header class="topbar">
+        <a href="/" class="brand">
+            <div class="brand-icon">
+                <svg viewBox="0 0 24 24"><path d="M3 13h2v-2H3v2zm0 4h2v-2H3v2zm0-8h2V7H3v2zm4 4h14v-2H7v2zm0 4h14v-2H7v2zM7 7v2h14V7H7z"/></svg>
+            </div>
+            <div class="brand-text">
+                <h1>SYSMON TELEMETRY</h1>
+            </div>
+            <span class="brand-badge">COOLIFY v2.0</span>
+        </a>
+
+        <!-- Statistiche globali flotta -->
+        <div class="topbar-stats">
+            <div class="stat-pill" id="dbStatusPill">
+                <span class="pulse-indicator"></span>
+                <span>Verifica DB...</span>
+            </div>
+            <div class="stat-pill">
+                <span class="stat-pill-label">Macchine Totali:</span>
+                <span class="stat-pill-value" id="totalMachinesCount">-</span>
+            </div>
+            <div class="stat-pill">
+                <span class="stat-pill-label">Online:</span>
+                <span class="stat-pill-value" style="color: var(--success);" id="onlineMachinesCount">-</span>
+            </div>
+        </div>
+
+        <!-- Controlli & Azioni -->
+        <div class="topbar-actions">
+            <div style="display:flex; align-items:center; gap:8px;">
+                <span style="font-size:12px; color:var(--text-muted);">Aggiornamento:</span>
+                <select id="autoRefreshSelect" class="search-input" style="width: auto; padding: 6px 10px;">
+                    <option value="5000">Ogni 5s</option>
+                    <option value="10000">Ogni 10s</option>
+                    <option value="30000">Ogni 30s</option>
+                    <option value="0">Pausa</option>
+                </select>
+            </div>
+
+            <button id="refreshBtn" class="btn" title="Aggiorna Adesso">
+                <svg style="width:14px;height:14px;fill:currentColor;" viewBox="0 0 24 24"><path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>
+                Aggiorna
+            </button>
+
+            <a href="/docs" target="_blank" class="btn btn-primary">
+                API Docs (/docs)
+            </a>
+        </div>
+    </header>
+
+    <!-- MAIN APP CONTAINER -->
+    <div class="app-container">
+
+        <!-- SIDEBAR: MACCHINE DELLA FLOTTA -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <span class="sidebar-title">Flotta Macchine</span>
+            </div>
+
+            <div class="search-box">
+                <svg class="search-icon" viewBox="0 0 24 24"><path fill="currentColor" d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
+                <input type="text" id="searchMachines" class="search-input" placeholder="Cerca macchina per hostname...">
+            </div>
+
+            <div class="machines-list" id="machinesList">
+                <div style="text-align: center; padding: 20px; color: var(--text-dim);">Caricamento flotta...</div>
+            </div>
+        </aside>
+
+        <!-- MAIN CONTENT: DETTAGLIO TELEMETRIA MACCHINA SELEZIONATA -->
+        <main class="content">
+
+            <!-- Banner Notifica Connessione DB -->
+            <div id="dbAlertBanner" class="db-alert-banner" style="display: none;">
+                <div style="display:flex; align-items:center; gap:12px;">
+                    <svg viewBox="0 0 24 24"><path fill="currentColor" d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>
+                    <div>
+                        <strong>PostgreSQL non connesso al backend su Coolify.</strong>
+                        <div style="font-size:12px; margin-top:2px;">Configura la variabile d'ambiente <code>DATABASE_URL</code> nell'app Coolify per salvare e visualizzare i dati storici.</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Host Header Card -->
+            <section class="host-banner">
+                <div class="host-info-group">
+                    <div class="host-avatar">
+                        <svg viewBox="0 0 24 24"><path fill="currentColor" d="M4 6h16v10H4V6m16 12a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2H0v2h24v-2h-4z"/></svg>
+                    </div>
+                    <div>
+                        <div class="host-title">
+                            <span id="hostName">Seleziona una macchina</span>
+                            <span id="hostHealthBadge" class="badge-status online">-</span>
+                        </div>
+                        <div class="host-sub">
+                            <span class="host-sub-item">💻 <span id="hostOs">-</span></span>
+                            <span class="host-sub-item">⏱️ <span id="hostUptime">-</span></span>
+                            <span class="host-sub-item">📡 <span id="hostLastSeen">-</span></span>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Metrics Cards Grid (Vitals) -->
+            <section class="metrics-grid">
+                <!-- CPU Card -->
+                <div class="metric-card">
+                    <div class="metric-card-head">
+                        <span class="metric-label">Carico CPU</span>
+                        <div class="metric-icon-wrap" style="background: rgba(6, 182, 212, 0.15); color: var(--primary);">
+                            <svg style="width:18px;height:18px;" viewBox="0 0 24 24"><path fill="currentColor" d="M17 17H7V7h10v10zm2-12h-2V3h-2v2h-2V3h-2v2H9V3H7v2H5c-1.1 0-2 .9-2 2v2H1v2h2v2H1v2h2v2c0 1.1.9 2 2 2h2v2h2v-2h2v2h2v-2h2v2h2v-2h2c1.1 0 2-.9 2-2v-2h2v-2h-2v-2h2v-2h-2V7c0-1.1-.9-2-2-2zm0 14H5V7h14v12z"/></svg>
+                        </div>
+                    </div>
+                    <div class="metric-value-wrap">
+                        <span class="metric-big-value" id="cpuValue">0</span>
+                        <span class="metric-unit">%</span>
+                    </div>
+                    <div class="metric-progress">
+                        <div class="metric-progress-fill" id="cpuProgress" style="width: 0%;"></div>
+                    </div>
+                    <div class="metric-footer">
+                        <span id="cpuSub">Rilevamento in corso...</span>
+                    </div>
+                </div>
+
+                <!-- RAM Card -->
+                <div class="metric-card">
+                    <div class="metric-card-head">
+                        <span class="metric-label">Memoria RAM</span>
+                        <div class="metric-icon-wrap" style="background: rgba(139, 92, 246, 0.15); color: var(--secondary);">
+                            <svg style="width:18px;height:18px;" viewBox="0 0 24 24"><path fill="currentColor" d="M2 7v10h20V7H2zm18 8H4V9h16v6zM6 11h2v2H6v-2zm4 0h2v2h-2v-2zm4 0h2v2h-2v-2z"/></svg>
+                        </div>
+                    </div>
+                    <div class="metric-value-wrap">
+                        <span class="metric-big-value" id="ramValue">0</span>
+                        <span class="metric-unit">%</span>
+                    </div>
+                    <div class="metric-progress">
+                        <div class="metric-progress-fill" id="ramProgress" style="width: 0%;"></div>
+                    </div>
+                    <div class="metric-footer">
+                        <span id="ramSub">Rilevamento in corso...</span>
+                    </div>
+                </div>
+
+                <!-- DISK Card -->
+                <div class="metric-card">
+                    <div class="metric-card-head">
+                        <span class="metric-label">Spazio Disco</span>
+                        <div class="metric-icon-wrap" style="background: rgba(245, 158, 11, 0.15); color: var(--warning);">
+                            <svg style="width:18px;height:18px;" viewBox="0 0 24 24"><path fill="currentColor" d="M6 2h12a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2zm0 2v4h12V4H6zm12 8H6v8h12v-8zm-2 2v4h-2v-4h2z"/></svg>
+                        </div>
+                    </div>
+                    <div class="metric-value-wrap">
+                        <span class="metric-big-value" id="diskValue">0</span>
+                        <span class="metric-unit">%</span>
+                    </div>
+                    <div class="metric-progress">
+                        <div class="metric-progress-fill" id="diskProgress" style="width: 0%;"></div>
+                    </div>
+                    <div class="metric-footer">
+                        <span id="diskSub">Rilevamento in corso...</span>
+                    </div>
+                </div>
+
+                <!-- NETWORK Card -->
+                <div class="metric-card">
+                    <div class="metric-card-head">
+                        <span class="metric-label">Traffico Rete</span>
+                        <div class="metric-icon-wrap" style="background: rgba(16, 185, 129, 0.15); color: var(--success);">
+                            <svg style="width:18px;height:18px;" viewBox="0 0 24 24"><path fill="currentColor" d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/></svg>
+                        </div>
+                    </div>
+                    <div class="metric-value-wrap">
+                        <span class="metric-big-value" id="netValue">0</span>
+                        <span class="metric-unit">MB recv</span>
+                    </div>
+                    <div class="metric-footer" style="margin-top:auto;">
+                        <span id="netSub">Inviati: - MB</span>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Time-Series Charts Grid -->
+            <section class="charts-grid">
+                <div class="chart-card">
+                    <div class="chart-head">
+                        <span class="chart-title">Andamento Temporale CPU & RAM (%)</span>
+                    </div>
+                    <div class="chart-canvas-wrapper">
+                        <canvas id="chartCpuRam"></canvas>
+                    </div>
+                </div>
+
+                <div class="chart-card">
+                    <div class="chart-head">
+                        <span class="chart-title">Traffico Rete Cumulativo (MB)</span>
+                    </div>
+                    <div class="chart-canvas-wrapper">
+                        <canvas id="chartNetwork"></canvas>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Partizioni Dischi -->
+            <section class="card-section">
+                <div class="section-head">
+                    <span class="section-title">Partizioni e Volumi di Storage</span>
+                </div>
+                <div id="disksList"></div>
+            </section>
+
+            <!-- Top Processi Explorer -->
+            <section class="card-section">
+                <div class="section-head">
+                    <span class="section-title">Top Processi Attivi (Consumo Risorse)</span>
+                    <input type="text" id="searchProcesses" class="search-input" style="width:260px;" placeholder="Filtra per nome o PID...">
+                </div>
+                <div class="table-responsive">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>PID</th>
+                                <th>Nome Processo</th>
+                                <th>Utente</th>
+                                <th>Stato</th>
+                                <th>CPU %</th>
+                                <th>RAM %</th>
+                                <th>RAM RSS</th>
+                            </tr>
+                        </thead>
+                        <tbody id="processesTableBody">
+                            <tr><td colspan="7" style="text-align:center; color:var(--text-dim); padding:20px;">Caricamento processi...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <!-- Raw JSON Telemetry Inspector -->
+            <section class="card-section">
+                <div class="section-head">
+                    <span class="section-title">Ispettore Payload Telemetrico Completo (JSON)</span>
+                    <button id="copyJsonBtn" class="btn">Copia JSON</button>
+                </div>
+                <pre class="raw-json-block" id="rawJsonView">// Seleziona una macchina per visualizzare il payload JSON completo</pre>
+            </section>
+
+        </main>
+    </div>
+
+    <!-- Application Script -->
+    <script src="/static/js/app.js"></script>
+</body>
+</html>
