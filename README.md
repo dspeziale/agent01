@@ -20,7 +20,7 @@
    - Server di produzione basato su **FastAPI** e **Uvicorn** ad altissime prestazioni.
    - Persistenza automatica su **PostgreSQL 16**: salva l'anagrafica delle macchine, le serie storiche aggregate e l'intero payload dettagliato in colonna `raw_payload JSONB` indicizzata con indici GIN e B-Tree.
    - Pronto al deployment su **Coolify** con un click tramite `docker-compose.yml` e `server/Dockerfile` (con certificati SSL Let's Encrypt automatici e health check integrato).
-   - Dashboard web moderna interattiva con dark mode e telemetria in tempo reale.
+   - Dashboard web moderna interattiva con dark mode, grafica dark cyan glassmorphism e **design 100% responsive ottimizzato per smartphone e tablet** (cassetto laterale flotta, griglia 2x2 vitals, tabelle e modal touch-friendly).
    - Documentazione API interattiva automatica **Swagger UI** disponibile su `/docs`.
 
 3. **Buffer Offline Locale (Zero Perdita Dati)**:
