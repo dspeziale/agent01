@@ -2,7 +2,7 @@
 <html lang="it">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, viewport-fit=cover">
     <title>Pulsar Telemetry Dashboard | Monitoraggio Flotta & Metriche</title>
     <meta name="description" content="Dashboard in tempo reale per l'analisi delle metriche di sistema, CPU, RAM, dischi, rete e processi raccolti da Pulsar.">
     
@@ -20,24 +20,33 @@
 
     <!-- TOPBAR -->
     <header class="topbar">
-        <a href="/" class="brand">
-            <div class="brand-icon">
-                <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/></svg>
-            </div>
-            <div class="brand-text">
-                <h1>PULSAR TELEMETRY</h1>
-            </div>
-            <span class="brand-badge">COOLIFY v2.0</span>
-        </a>
+        <div class="topbar-left">
+            <!-- Mobile Fleet Drawer Toggle Button -->
+            <button id="mobileFleetBtn" class="mobile-fleet-btn btn" onclick="toggleFleetDrawer()" aria-label="Apri Flotta Macchine" title="Flotta Macchine">
+                <svg class="icon-svg" viewBox="0 0 24 24"><path fill="currentColor" d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z"/></svg>
+                <span class="mobile-btn-text">Flotta</span>
+                <span class="mobile-online-badge" id="mobileOnlineBadge">0</span>
+            </button>
 
-        <!-- Statistiche globali flotta -->
+            <a href="/" class="brand">
+                <div class="brand-icon">
+                    <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/></svg>
+                </div>
+                <div class="brand-text">
+                    <h1>PULSAR</h1>
+                </div>
+                <span class="brand-badge">v2.0</span>
+            </a>
+        </div>
+
+        <!-- Statistiche globali flotta (Desktop) -->
         <div class="topbar-stats">
             <div class="stat-pill" id="dbStatusPill">
                 <span class="pulse-indicator"></span>
                 <span>Verifica DB...</span>
             </div>
             <div class="stat-pill">
-                <span class="stat-pill-label">Macchine Totali:</span>
+                <span class="stat-pill-label">Macchine:</span>
                 <span class="stat-pill-value" id="totalMachinesCount">-</span>
             </div>
             <div class="stat-pill">
@@ -48,28 +57,28 @@
 
         <!-- Controlli & Azioni -->
         <div class="topbar-actions">
-            <div style="display:flex; align-items:center; gap:8px;">
-                <span style="font-size:12px; color:var(--text-muted);">Aggiornamento:</span>
-                <select id="autoRefreshSelect" class="search-input" style="width: auto; padding: 6px 10px;">
-                    <option value="5000">Ogni 5s</option>
-                    <option value="10000">Ogni 10s</option>
-                    <option value="30000">Ogni 30s</option>
+            <div class="refresh-control-group">
+                <span class="refresh-label">Refresh:</span>
+                <select id="autoRefreshSelect" class="search-input auto-refresh-select">
+                    <option value="5000">5s</option>
+                    <option value="10000">10s</option>
+                    <option value="30000">30s</option>
                     <option value="0">Pausa</option>
                 </select>
             </div>
 
-            <button id="refreshBtn" class="btn" title="Aggiorna Adesso">
-                <svg style="width:14px;height:14px;fill:currentColor;" viewBox="0 0 24 24"><path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>
-                Aggiorna
+            <button id="refreshBtn" class="btn" title="Aggiorna Adesso" aria-label="Aggiorna Adesso">
+                <svg class="icon-svg" viewBox="0 0 24 24"><path fill="currentColor" d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>
+                <span class="btn-text">Aggiorna</span>
             </button>
 
-            <button id="openInstallModalBtn" class="btn btn-primary" onclick="openInstallModal()">
-                <svg style="width:14px;height:14px;fill:currentColor;" viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
-                + Installa Sonda
+            <button id="openInstallModalBtn" class="btn btn-primary" onclick="openInstallModal()" title="Installa Sonda">
+                <svg class="icon-svg" viewBox="0 0 24 24"><path fill="currentColor" d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
+                <span class="btn-text">+ Sonda</span>
             </button>
 
-            <a href="/docs" target="_blank" class="btn" style="border-color:var(--border-glass);">
-                API Docs
+            <a href="/docs" target="_blank" class="btn btn-docs" title="API Docs">
+                API
             </a>
         </div>
     </header>
@@ -77,10 +86,33 @@
     <!-- MAIN APP CONTAINER -->
     <div class="app-container">
 
+        <!-- Mobile Drawer Backdrop -->
+        <div id="sidebarBackdrop" class="sidebar-backdrop" onclick="closeFleetDrawer()"></div>
+
         <!-- SIDEBAR: MACCHINE DELLA FLOTTA -->
-        <aside class="sidebar">
+        <aside class="sidebar" id="fleetSidebar">
             <div class="sidebar-header">
-                <span class="sidebar-title">Flotta Macchine</span>
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <svg style="width:18px;height:18px;color:var(--primary);" viewBox="0 0 24 24"><path fill="currentColor" d="M4 6h16v10H4V6m16 12a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2H0v2h24v-2h-4z"/></svg>
+                    <span class="sidebar-title">Flotta Macchine</span>
+                </div>
+                <button class="drawer-close-btn" onclick="closeFleetDrawer()" aria-label="Chiudi menu flotta">&times;</button>
+            </div>
+
+            <!-- Mobile drawer extra stats -->
+            <div class="mobile-drawer-stats">
+                <div class="stat-pill" id="mobileDbStatusPill">
+                    <span class="pulse-indicator"></span>
+                    <span>DB Server</span>
+                </div>
+                <div class="stat-pill">
+                    <span class="stat-pill-label">Totali:</span>
+                    <span class="stat-pill-value" id="mobileTotalMachinesCount">-</span>
+                </div>
+                <div class="stat-pill">
+                    <span class="stat-pill-label">Online:</span>
+                    <span class="stat-pill-value" style="color: var(--success);" id="mobileOnlineMachinesCount">-</span>
+                </div>
             </div>
 
             <div class="search-box">
@@ -94,7 +126,7 @@
         </aside>
 
         <!-- MAIN CONTENT: DETTAGLIO TELEMETRIA MACCHINA SELEZIONATA -->
-        <main class="content">
+        <main class="content" id="mainContent">
 
             <!-- Banner Notifica Connessione DB -->
             <div id="dbAlertBanner" class="db-alert-banner" style="display: none;">
@@ -113,7 +145,7 @@
                     <div class="host-avatar">
                         <svg viewBox="0 0 24 24"><path fill="currentColor" d="M4 6h16v10H4V6m16 12a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2H0v2h24v-2h-4z"/></svg>
                     </div>
-                    <div>
+                    <div class="host-details">
                         <div class="host-title">
                             <span id="hostName">Seleziona una macchina</span>
                             <span id="hostHealthBadge" class="badge-status online">-</span>
@@ -125,6 +157,10 @@
                         </div>
                     </div>
                 </div>
+                <button class="btn btn-change-machine" onclick="toggleFleetDrawer()" title="Cambia Macchina Selezionata">
+                    <svg style="width:14px;height:14px;fill:currentColor;" viewBox="0 0 24 24"><path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46A7.93 7.93 0 0 0 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74A7.93 7.93 0 0 0 4 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z"/></svg>
+                    <span>Cambia Flotta</span>
+                </button>
             </section>
 
             <!-- Metrics Cards Grid (Vitals) -->
@@ -132,9 +168,9 @@
                 <!-- CPU Card -->
                 <div class="metric-card">
                     <div class="metric-card-head">
-                        <span class="metric-label">Carico CPU</span>
+                        <span class="metric-label">CPU</span>
                         <div class="metric-icon-wrap" style="background: rgba(6, 182, 212, 0.15); color: var(--primary);">
-                            <svg style="width:18px;height:18px;" viewBox="0 0 24 24"><path fill="currentColor" d="M17 17H7V7h10v10zm2-12h-2V3h-2v2h-2V3h-2v2H9V3H7v2H5c-1.1 0-2 .9-2 2v2H1v2h2v2H1v2h2v2c0 1.1.9 2 2 2h2v2h2v-2h2v2h2v-2h2v2h2v-2h2c1.1 0 2-.9 2-2v-2h2v-2h-2v-2h2v-2h-2V7c0-1.1-.9-2-2-2zm0 14H5V7h14v12z"/></svg>
+                            <svg style="width:16px;height:16px;" viewBox="0 0 24 24"><path fill="currentColor" d="M17 17H7V7h10v10zm2-12h-2V3h-2v2h-2V3h-2v2H9V3H7v2H5c-1.1 0-2 .9-2 2v2H1v2h2v2H1v2h2v2c0 1.1.9 2 2 2h2v2h2v-2h2v2h2v-2h2v2h2v-2h2c1.1 0 2-.9 2-2v-2h2v-2h-2v-2h2v-2h-2V7c0-1.1-.9-2-2-2zm0 14H5V7h14v12z"/></svg>
                         </div>
                     </div>
                     <div class="metric-value-wrap">
@@ -152,9 +188,9 @@
                 <!-- RAM Card -->
                 <div class="metric-card">
                     <div class="metric-card-head">
-                        <span class="metric-label">Memoria RAM</span>
+                        <span class="metric-label">RAM</span>
                         <div class="metric-icon-wrap" style="background: rgba(139, 92, 246, 0.15); color: var(--secondary);">
-                            <svg style="width:18px;height:18px;" viewBox="0 0 24 24"><path fill="currentColor" d="M2 7v10h20V7H2zm18 8H4V9h16v6zM6 11h2v2H6v-2zm4 0h2v2h-2v-2zm4 0h2v2h-2v-2z"/></svg>
+                            <svg style="width:16px;height:16px;" viewBox="0 0 24 24"><path fill="currentColor" d="M2 7v10h20V7H2zm18 8H4V9h16v6zM6 11h2v2H6v-2zm4 0h2v2h-2v-2zm4 0h2v2h-2v-2z"/></svg>
                         </div>
                     </div>
                     <div class="metric-value-wrap">
@@ -172,9 +208,9 @@
                 <!-- DISK Card -->
                 <div class="metric-card">
                     <div class="metric-card-head">
-                        <span class="metric-label">Spazio Disco</span>
+                        <span class="metric-label">DISCO</span>
                         <div class="metric-icon-wrap" style="background: rgba(245, 158, 11, 0.15); color: var(--warning);">
-                            <svg style="width:18px;height:18px;" viewBox="0 0 24 24"><path fill="currentColor" d="M6 2h12a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2zm0 2v4h12V4H6zm12 8H6v8h12v-8zm-2 2v4h-2v-4h2z"/></svg>
+                            <svg style="width:16px;height:16px;" viewBox="0 0 24 24"><path fill="currentColor" d="M6 2h12a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2zm0 2v4h12V4H6zm12 8H6v8h12v-8zm-2 2v4h-2v-4h2z"/></svg>
                         </div>
                     </div>
                     <div class="metric-value-wrap">
@@ -192,17 +228,17 @@
                 <!-- NETWORK Card -->
                 <div class="metric-card">
                     <div class="metric-card-head">
-                        <span class="metric-label">Traffico Rete</span>
+                        <span class="metric-label">RETE</span>
                         <div class="metric-icon-wrap" style="background: rgba(16, 185, 129, 0.15); color: var(--success);">
-                            <svg style="width:18px;height:18px;" viewBox="0 0 24 24"><path fill="currentColor" d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/></svg>
+                            <svg style="width:16px;height:16px;" viewBox="0 0 24 24"><path fill="currentColor" d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/></svg>
                         </div>
                     </div>
                     <div class="metric-value-wrap">
                         <span class="metric-big-value" id="netValue">0</span>
-                        <span class="metric-unit">MB recv</span>
+                        <span class="metric-unit">MB in</span>
                     </div>
                     <div class="metric-footer" style="margin-top:auto;">
-                        <span id="netSub">Inviati: - MB</span>
+                        <span id="netSub">Out: - MB</span>
                     </div>
                 </div>
             </section>
@@ -240,7 +276,9 @@
             <section class="card-section">
                 <div class="section-head">
                     <span class="section-title">Top Processi Attivi (Consumo Risorse)</span>
-                    <input type="text" id="searchProcesses" class="search-input" style="width:260px;" placeholder="Filtra per nome o PID...">
+                    <div class="process-search-wrap">
+                        <input type="text" id="searchProcesses" class="search-input" placeholder="Filtra processi o PID...">
+                    </div>
                 </div>
                 <div class="table-responsive">
                     <table>
@@ -265,7 +303,7 @@
             <!-- Raw JSON Telemetry Inspector -->
             <section class="card-section">
                 <div class="section-head">
-                    <span class="section-title">Ispettore Payload Telemetrico Completo (JSON)</span>
+                    <span class="section-title">Payload Telemetrico Completo (JSON)</span>
                     <button id="copyJsonBtn" class="btn">Copia JSON</button>
                 </div>
                 <pre class="raw-json-block" id="rawJsonView">// Seleziona una macchina per visualizzare il payload JSON completo</pre>
@@ -279,78 +317,98 @@
         <div class="modal-card">
             <div class="modal-header">
                 <div style="display:flex; align-items:center; gap:10px;">
-                    <span class="host-pill host-pill-blue">REMOTE AGENT DEPLOY</span>
+                    <span class="host-pill host-pill-blue">DEPLOY</span>
                     <h3 style="margin:0; font-size:18px;">Installa Nuova Sonda</h3>
                 </div>
-                <button class="modal-close" onclick="closeInstallModal()">&times;</button>
+                <button class="modal-close" onclick="closeInstallModal()" aria-label="Chiudi modal">&times;</button>
+            </div>
+
+            <!-- Modal OS Tabs -->
+            <div class="modal-tabs">
+                <button class="modal-tab active" data-target="tab-windows" onclick="switchInstallTab('tab-windows', this)">🪟 Windows</button>
+                <button class="modal-tab" data-target="tab-linux" onclick="switchInstallTab('tab-linux', this)">🐧 Linux</button>
+                <button class="modal-tab" data-target="tab-android" onclick="switchInstallTab('tab-android', this)">🤖 Android</button>
+                <button class="modal-tab" data-target="tab-debug" onclick="switchInstallTab('tab-debug', this)">🔍 Debug</button>
             </div>
             
-            <p style="color:var(--text-muted); font-size:13px; margin:0 0 16px 0; line-height:1.5;">
-                Esegui uno dei comandi seguenti direttamente nel terminale del computer o server da monitorare.
-                L'agente si configurerà automaticamente come servizio di background persistente.
-            </p>
+            <div class="modal-body">
+                <p style="color:var(--text-muted); font-size:13px; margin:0 0 14px 0; line-height:1.4;">
+                    Esegui il comando nel terminale del dispositivo. L'agente si configurerà automaticamente in background.
+                </p>
 
-            <!-- Card Windows -->
-            <div class="install-command-card">
-                <div class="install-command-title">
-                    <span style="display:flex; align-items:center; gap:8px;">
-                        <span style="font-size:18px;">🪟</span>
-                        <strong>WINDOWS</strong> <span style="color:var(--text-muted); font-size:12px;">(PowerShell come Amministratore)</span>
-                    </span>
-                    <button class="copy-cmd-btn" onclick="copyInstallCmd('irm https://simei.dsc-italy.app/install.ps1 | iex', this)">Copia</button>
+                <!-- Panel Windows -->
+                <div id="tab-windows" class="tab-panel active">
+                    <div class="install-command-card">
+                        <div class="install-command-title">
+                            <span style="display:flex; align-items:center; gap:8px;">
+                                <strong style="color:var(--primary);">WINDOWS POWERSHELL</strong>
+                                <span style="color:var(--text-muted); font-size:11px;">(Admin)</span>
+                            </span>
+                            <button class="copy-cmd-btn" onclick="copyInstallCmd('irm https://simei.dsc-italy.app/install.ps1 | iex', this)">Copia Comando</button>
+                        </div>
+                        <div class="command-box">irm https://simei.dsc-italy.app/install.ps1 | iex</div>
+                        <div style="font-size:11px; color:var(--text-muted); margin-top:8px;">
+                            Installazione automatica come Attività Pianificata ad ogni avvio di sistema.
+                        </div>
+                    </div>
                 </div>
-                <div class="command-box">irm https://simei.dsc-italy.app/install.ps1 | iex</div>
+
+                <!-- Panel Linux -->
+                <div id="tab-linux" class="tab-panel">
+                    <div class="install-command-card">
+                        <div class="install-command-title">
+                            <span style="display:flex; align-items:center; gap:8px;">
+                                <strong style="color:var(--secondary);">LINUX TERMINALE</strong>
+                                <span style="color:var(--text-muted); font-size:11px;">(Root / Sudo)</span>
+                            </span>
+                            <button class="copy-cmd-btn" onclick="copyInstallCmd('curl -fsSL https://simei.dsc-italy.app/install.sh | sudo sh', this)">Copia Comando</button>
+                        </div>
+                        <div class="command-box">curl -fsSL https://simei.dsc-italy.app/install.sh | sudo sh</div>
+                        <div style="font-size:11px; color:var(--text-muted); margin-top:8px;">
+                            Alternativa wget: <code>wget -qO- https://simei.dsc-italy.app/install.sh | sudo sh</code>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Panel Android -->
+                <div id="tab-android" class="tab-panel">
+                    <div class="install-command-card" style="border-color: rgba(16, 185, 129, 0.4);">
+                        <div class="install-command-title">
+                            <span style="display:flex; align-items:center; gap:8px;">
+                                <strong style="color:var(--success);">ANDROID (TERMUX ONE-LINER)</strong>
+                            </span>
+                            <button class="copy-cmd-btn" onclick="copyInstallCmd('curl -fsSL https://simei.dsc-italy.app/install-android.sh | sh', this)">Copia Comando</button>
+                        </div>
+                        <div class="command-box">curl -fsSL https://simei.dsc-italy.app/install-android.sh | sh</div>
+                        <div style="font-size:11px; color:var(--text-muted); margin-top:10px; line-height:1.4;">
+                            📱 <strong>Avvio immediato:</strong> Scarica l'app libera Termux da F-Droid, incolla il comando e l'agente inizia a trasmettere i parametri dello smartphone.
+                        </div>
+                        <div style="font-size:11px; color:var(--text-muted); margin-top:8px; line-height:1.4;">
+                            📦 <strong>App Nativa Android:</strong> Progetto completo Kotlin &amp; Jetpack Compose in <code>android/</code> compilabile con <code>./gradlew assembleDebug</code>.
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Panel Debug -->
+                <div id="tab-debug" class="tab-panel">
+                    <div class="install-command-card" style="border-color: rgba(245, 158, 11, 0.4);">
+                        <div class="install-command-title">
+                            <span style="display:flex; align-items:center; gap:8px;">
+                                <strong style="color:var(--warning);">SONDA DI DEBUG A VIDEO</strong>
+                            </span>
+                            <button class="copy-cmd-btn" onclick="copyInstallCmd('irm https://simei.dsc-italy.app/debug.ps1 | iex', this)">Copia Windows</button>
+                        </div>
+                        <div style="font-size:11px; color:var(--text-muted); margin-bottom:8px;">
+                            Esegue un test completo e visualizza i log a schermo per individuare subito eventuali problemi (DNS, SSL, Task, invio HTTP):
+                        </div>
+                        <div class="command-box" style="margin-bottom:6px;">Windows: irm https://simei.dsc-italy.app/debug.ps1 | iex</div>
+                        <div class="command-box">Linux: curl -fsSL https://simei.dsc-italy.app/debug.sh | sudo sh</div>
+                    </div>
+                </div>
             </div>
 
-            <!-- Card Linux -->
-            <div class="install-command-card" style="margin-top:14px;">
-                <div class="install-command-title">
-                    <span style="display:flex; align-items:center; gap:8px;">
-                        <span style="font-size:18px;">🐧</span>
-                        <strong>LINUX</strong> <span style="color:var(--text-muted); font-size:12px;">(Terminale con sudo sh)</span>
-                    </span>
-                    <button class="copy-cmd-btn" onclick="copyInstallCmd('curl -fsSL https://simei.dsc-italy.app/install.sh | sudo sh', this)">Copia</button>
-                </div>
-                <div class="command-box">curl -fsSL https://simei.dsc-italy.app/install.sh | sudo sh</div>
-                <div style="font-size:11px; color:var(--text-muted); margin-top:6px;">Alternativa con wget: <code>wget -qO- https://simei.dsc-italy.app/install.sh | sudo sh</code></div>
-            </div>
-
-            <!-- Card Android -->
-            <div class="install-command-card" style="margin-top:14px; border-color: rgba(16, 185, 129, 0.4);">
-                <div class="install-command-title">
-                    <span style="display:flex; align-items:center; gap:8px;">
-                        <span style="font-size:18px;">🤖</span>
-                        <strong style="color:var(--success);">ANDROID</strong> <span style="color:var(--text-muted); font-size:12px;">(Termux CLI &amp; App Nativa)</span>
-                    </span>
-                    <button class="copy-cmd-btn" onclick="copyInstallCmd('curl -fsSL https://simei.dsc-italy.app/install-android.sh | sh', this)">Copia Termux</button>
-                </div>
-                <div style="font-size:12px; color:var(--text-muted); margin-bottom:6px;">
-                    1. <strong>Termux One-Liner</strong> (avvio immediato in background):
-                </div>
-                <div class="command-box">curl -fsSL https://simei.dsc-italy.app/install-android.sh | sh</div>
-                <div style="font-size:12px; color:var(--text-muted); margin-top:8px;">
-                    2. <strong>App Nativa Android</strong>: Progetto completo in Kotlin &amp; Jetpack Compose disponibile nella cartella <code>android/</code> del repository (apribile in Android Studio o compilabile con <code>./gradlew assembleDebug</code>).
-                </div>
-            </div>
-
-            <!-- Card Diagnostica & Debug -->
-            <div class="install-command-card" style="margin-top:14px; border-color: rgba(245, 158, 11, 0.4);">
-                <div class="install-command-title">
-                    <span style="display:flex; align-items:center; gap:8px;">
-                        <span style="font-size:18px;">🔍</span>
-                        <strong style="color:var(--warning);">SONDA DI DEBUG A VIDEO</strong> <span style="color:var(--text-muted); font-size:12px;">(Diagnostica istantanea a schermo)</span>
-                    </span>
-                    <button class="copy-cmd-btn" onclick="copyInstallCmd('irm https://simei.dsc-italy.app/debug.ps1 | iex', this)">Copia Windows</button>
-                </div>
-                <div style="font-size:12px; color:var(--text-muted); margin-bottom:8px;">
-                    Se la sonda sembra installata ma non compare nella lista, esegui la sonda di debug per vedere tutti i dettagli a video (DNS, SSL, Task, invio HTTP in tempo reale):
-                </div>
-                <div class="command-box" style="margin-bottom:6px;">Windows: irm https://simei.dsc-italy.app/debug.ps1 | iex</div>
-                <div class="command-box">Linux:   curl -fsSL https://simei.dsc-italy.app/debug.sh | sudo sh</div>
-            </div>
-
-            <div style="margin-top:20px; text-align:right;">
-                <button class="btn" onclick="closeInstallModal()">Chiudi</button>
+            <div class="modal-footer">
+                <button class="btn btn-primary" onclick="closeInstallModal()" style="min-width:90px;">Fatto</button>
             </div>
         </div>
     </div>

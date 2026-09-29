@@ -244,20 +244,36 @@ async function fetchFleetData(showLoading = true) {
 }
 
 function updateDbStatus(isConnected) {
-    if (isConnected) {
-        elements.dbStatusPill.innerHTML = '<span class="pulse-indicator"></span> <span>PostgreSQL Connesso</span>';
-        elements.dbAlertBanner.style.display = 'none';
-    } else {
-        elements.dbStatusPill.innerHTML = '<span class="pulse-indicator offline"></span> <span>PostgreSQL Non Connesso</span>';
-        elements.dbAlertBanner.style.display = 'flex';
+    const onlineHtml = '<span class="pulse-indicator"></span> <span>PostgreSQL Connesso</span>';
+    const offlineHtml = '<span class="pulse-indicator offline"></span> <span>PostgreSQL Non Connesso</span>';
+    if (elements.dbStatusPill) {
+        elements.dbStatusPill.innerHTML = isConnected ? onlineHtml : offlineHtml;
+    }
+    const mobileDb = document.getElementById('mobileDbStatusPill');
+    if (mobileDb) {
+        mobileDb.innerHTML = isConnected 
+            ? '<span class="pulse-indicator"></span> <span>DB Server OK</span>'
+            : '<span class="pulse-indicator offline"></span> <span>DB Server Offline</span>';
+    }
+    if (elements.dbAlertBanner) {
+        elements.dbAlertBanner.style.display = isConnected ? 'none' : 'flex';
     }
 }
 
 function updateFleetStats() {
     const total = state.machines.length;
     const online = state.machines.filter(m => m.is_online).length;
-    elements.totalMachinesCount.textContent = total;
-    elements.onlineMachinesCount.textContent = online;
+    if (elements.totalMachinesCount) elements.totalMachinesCount.textContent = total;
+    if (elements.onlineMachinesCount) elements.onlineMachinesCount.textContent = online;
+
+    const mobileBadge = document.getElementById('mobileOnlineBadge');
+    if (mobileBadge) mobileBadge.textContent = online;
+
+    const mobileTotal = document.getElementById('mobileTotalMachinesCount');
+    if (mobileTotal) mobileTotal.textContent = total;
+
+    const mobileOnline = document.getElementById('mobileOnlineMachinesCount');
+    if (mobileOnline) mobileOnline.textContent = online;
 }
 
 // Rendering lista macchine nella sidebar
@@ -325,8 +341,14 @@ function renderMachinesList(filterQuery = '') {
 async function selectMachine(machineId) {
     state.selectedMachineId = machineId;
     renderMachinesList(); // aggiorna classe 'active'
+    closeFleetDrawer(); // se aperto su mobile, chiudi automaticamente il drawer
     await fetchMachineDetails(machineId);
     await fetchMachineHistory(machineId);
+
+    // Su mobile / tablet, scrolla verso l'inizio dei contenuti
+    if (window.innerWidth <= 1024) {
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
 }
 
 async function fetchMachineDetails(machineId) {
@@ -531,21 +553,59 @@ function escapeHtml(str) {
         .replace(/'/g, '&#039;');
 }
 
+/* Gestione Drawer Flotta su Mobile e Tablet */
+window.toggleFleetDrawer = function() {
+    const sidebar = document.getElementById('fleetSidebar');
+    const backdrop = document.getElementById('sidebarBackdrop');
+    if (!sidebar) return;
+    const isOpen = sidebar.classList.contains('open');
+    if (isOpen) {
+        window.closeFleetDrawer();
+    } else {
+        sidebar.classList.add('open');
+        if (backdrop) backdrop.classList.add('active');
+        document.body.style.overflow = 'hidden';
+    }
+};
+
+window.closeFleetDrawer = function() {
+    const sidebar = document.getElementById('fleetSidebar');
+    const backdrop = document.getElementById('sidebarBackdrop');
+    if (sidebar) sidebar.classList.remove('open');
+    if (backdrop) backdrop.classList.remove('active');
+    document.body.style.overflow = '';
+};
+
+/* Gestione Tabs Modal Installazione Sonda */
+window.switchInstallTab = function(tabId, btnEl) {
+    document.querySelectorAll('.modal-tab').forEach(tab => tab.classList.remove('active'));
+    document.querySelectorAll('.tab-panel').forEach(panel => panel.classList.remove('active'));
+    if (btnEl) btnEl.classList.add('active');
+    const targetPanel = document.getElementById(tabId);
+    if (targetPanel) targetPanel.classList.add('active');
+};
+
 /* Gestione Modal Installazione Sonda Remota */
 window.openInstallModal = function() {
     const modal = document.getElementById('installModal');
-    if (modal) modal.style.display = 'flex';
+    if (modal) {
+        modal.style.display = 'flex';
+        document.body.style.overflow = 'hidden';
+    }
 };
 
 window.closeInstallModal = function() {
     const modal = document.getElementById('installModal');
-    if (modal) modal.style.display = 'none';
+    if (modal) {
+        modal.style.display = 'none';
+        document.body.style.overflow = '';
+    }
 };
 
 window.copyInstallCmd = function(text, buttonEl) {
     navigator.clipboard.writeText(text).then(() => {
         const originalText = buttonEl.textContent;
-        buttonEl.textContent = 'Copiato!';
+        buttonEl.textContent = '✓ Copiato!';
         buttonEl.style.background = 'rgba(16, 185, 129, 0.3)';
         buttonEl.style.color = '#34d399';
         setTimeout(() => {
@@ -557,3 +617,11 @@ window.copyInstallCmd = function(text, buttonEl) {
         console.error('Errore durante la copia:', err);
     });
 };
+
+// Chiusura menu o modali con tasto Escape
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+        window.closeFleetDrawer();
+        window.closeInstallModal();
+    }
+});
