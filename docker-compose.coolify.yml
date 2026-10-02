@@ -1,8 +1,8 @@
 # Stack Pulsar per Coolify (build pack "Docker Compose").
 # Differenze rispetto a docker-compose.yml (sviluppo locale):
-# - nessuna porta pubblicata sull'host: il traffico passa dal proxy di Coolify
+# - server pubblicato sulla porta host ${PULSAR_HOST_PORT:-8800}: rete solo locale,
+#   nessun dominio/DNS (es. http://10.20.23.64:8800)
 # - nessun container_name / nome di rete fisso: li gestisce Coolify
-# Il dominio del servizio pulsar-server va assegnato in Coolify con la porta interna :8000
 services:
   postgres:
     image: postgres:16-alpine
@@ -32,8 +32,8 @@ services:
       PULSAR_SERVER_TOKEN: ${PULSAR_SERVER_TOKEN:-}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       PORT: 8000
-    expose:
-      - "8000"
+    ports:
+      - "${PULSAR_HOST_PORT:-8800}:8000"
 
 volumes:
   postgres_data:
