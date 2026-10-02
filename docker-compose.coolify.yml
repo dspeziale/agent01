@@ -1,39 +1,26 @@
 # Stack Pulsar per Coolify (build pack "Docker Compose").
 # Differenze rispetto a docker-compose.yml (sviluppo locale):
+# - usa l'istanza PostgreSQL gestita da Coolify (DATABASE_URL = "Postgres URL (internal)")
+#   raggiungibile tramite la rete Docker "coolify"
 # - server pubblicato sulla porta host ${PULSAR_HOST_PORT:-8800}: rete solo locale,
 #   nessun dominio/DNS (es. http://10.20.23.64:8800)
-# - nessun container_name / nome di rete fisso: li gestisce Coolify
+# - nessun container_name: lo gestisce Coolify
 services:
-  postgres:
-    image: postgres:16-alpine
-    restart: always
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER:-sysmon}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD obbligatoria}
-      POSTGRES_DB: ${POSTGRES_DB:-sysmon_db}
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: [ "CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-sysmon} -d ${POSTGRES_DB:-sysmon_db}" ]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
   pulsar-server:
     build:
       context: .
       dockerfile: server/Dockerfile
     restart: always
-    depends_on:
-      postgres:
-        condition: service_healthy
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER:-sysmon}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-sysmon_db}
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL obbligatoria}
       PULSAR_SERVER_TOKEN: ${PULSAR_SERVER_TOKEN:-}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       PORT: 8000
     ports:
       - "${PULSAR_HOST_PORT:-8800}:8000"
+    networks:
+      - coolify
 
-volumes:
-  postgres_data:
+networks:
+  coolify:
+    external: true
